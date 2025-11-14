@@ -6,13 +6,7 @@
 
 static inline bool isLowPrecedence(const Expression *exp) {
     if (!exp) return false;
-    
-    if (dynamic_cast<const BinaryOperation*>(exp) ||
-        dynamic_cast<const Select*>(exp)) {
-        return true;
-    }
-    
-    return false;
+    return dynamic_cast<const BinaryOperation*>(exp) || dynamic_cast<const Select*>(exp);
 }
 
 /* Declaration */
@@ -45,12 +39,8 @@ Number::Number(long long value) {
     this->value = std::move(value); 
 }
 
-std::shared_ptr<Type> Number::check(const Gamma &gamma, const Delta &delta) const {
-    if (value >= 0) { 
-        return std::make_shared<IntType>();
-    } else {
-        throw std::runtime_error("Negative number " + std::to_string(value) + " is not allowed");
-    }
+std::shared_ptr<Type> Number::check(const Gamma &gamma, const Delta &delta) const { 
+    return std::make_shared<IntType>();
 }
 
 std::string Number::toString() const { 
@@ -77,7 +67,7 @@ std::shared_ptr<Type> Select::check(const Gamma &gamma, const Delta &delta) cons
     std::shared_ptr<Type> guardType = guard->check(gamma, delta);
 
     if (!typesEqual(guardType, std::make_shared<IntType>())) {
-        throw std::runtime_error("Non-int type " + guardType->toString() + " for select guard '" + guard->toString() + "'");
+        throw std::runtime_error("non-int type " + guardType->toString() + " for select guard '" + guard->toString() + "'");
     }
 
     std::shared_ptr<Type> happyCaseType = happyCase->check(gamma, delta);
@@ -85,7 +75,7 @@ std::shared_ptr<Type> Select::check(const Gamma &gamma, const Delta &delta) cons
 
     if (!typesEqual(happyCaseType, unhappyCaseType)) {
         throw std::runtime_error(
-            "Incompatible types " + 
+            "incompatible types " + 
             happyCaseType->toString() + " vs " + unhappyCaseType->toString() + 
             " in select branches '" +
             happyCase->toString() + "' vs '" + unhappyCase->toString() + 
@@ -97,9 +87,7 @@ std::shared_ptr<Type> Select::check(const Gamma &gamma, const Delta &delta) cons
 }
 
 std::string Select::toString() const {
-    return "Select { guard: " + this->guard->toString() +
-           ", tt: " + this->happyCase->toString() +
-           ", ff: " + this->unhappyCase->toString() + " }";
+    return "Select { guard: " + guard->toString() + ", true: " + happyCase->toString() + ", false: " + unhappyCase->toString() + " }";
 }
 
 UnaryOperation::UnaryOperation(UnaryOperand operand, std::unique_ptr<Expression> expression) {
@@ -118,9 +106,18 @@ std::shared_ptr<Type> UnaryOperation::check(const Gamma &gamma, const Delta &del
 }
 
 std::string UnaryOperation::toString() const {
-    std::string op = (operand == UnaryOperand::NEG) ? "- " : "not ";
+    std::string op;
+    switch (operand) {
+        case UnaryOperand::NEG:
+            op = "- ";
+            break;
+        case UnaryOperand::NOT:
+            op = "not ";
+            break;
+    }
+
     std::string str = expression ? expression->toString() : "<null>";
-    return (isLowPrecedence(expression.get())) ? op + "(" + str + ")" : op + str;
+    return op + "(" + str + ")";
 }
 
 BinaryOperation::BinaryOperation(BinaryOperand operand, std::unique_ptr<Expression> lhs, std::unique_ptr<Expression> rhs) {
@@ -159,53 +156,54 @@ std::shared_ptr<Type> BinaryOperation::check(const Gamma &gamma, const Delta &de
 }
 
 std::string BinaryOperation::toString() const {
-    std::string opStr;
+    std::string op;
     switch (operand) {
         case BinaryOperand::ADD:
-            opStr = " + ";
+            op = " + ";
             break;
         case BinaryOperand::SUB:
-            opStr = " - ";
+            op = " - ";
             break;
         case BinaryOperand::MUL:
-            opStr = " * ";
+            op = " * ";
             break;
         case BinaryOperand::DIV:
-            opStr = " / ";
+            op = " / ";
             break;
         case BinaryOperand::EQ:
-            opStr = " == ";
+            op = " == ";
             break;
         case BinaryOperand::NOT_EQ:
-            opStr = " != ";
+            op = " != ";
             break;
         case BinaryOperand::LT:
-            opStr = " < ";
+            op = " < ";
             break;
         case BinaryOperand::LTE:
-            opStr = " <= ";
+            op = " <= ";
             break;
         case BinaryOperand::GT:
-            opStr = " > ";
+            op = " > ";
             break;
         case BinaryOperand::GTE:
-            opStr = " >= ";
+            op = " >= ";
             break;
         case BinaryOperand::AND:
-            opStr = " and ";
+            op = " and ";
             break;
         case BinaryOperand::OR:
-            opStr = " or ";
+            op = " or ";
             break;
     }
 
     std::string left = lhs ? lhs->toString() : "<null>";
     std::string right = rhs ? rhs->toString() : "<null>";
+    
     if (dynamic_cast<const Select*>(rhs.get())) {
         right = "(" + right + ")";
     }
     
-    return left + opStr + right;
+    return left + op + right;
 }
 
 // NewSingleton
@@ -327,7 +325,7 @@ std::shared_ptr<Type> ArrayAccess::check(const Gamma &gamma, const Delta &delta)
 }
 
 std::string ArrayAccess::toString() const {
-    return "ArrayAccess { array: " + array->toString() + ", idx: " + index->toString() + "}";
+    return "ArrayAccess { array: " + array->toString() + ", index: " + index->toString() + "}";
 }
 
 // FieldAccess
@@ -432,9 +430,6 @@ std::shared_ptr<Type> FunctionCall::check(const Gamma &gamma, const Delta &delta
 
 std::string FunctionCall::toString() const {
     std::string calleeStr = callee ? callee->toString() : "<null>";
-    if (isLowPrecedence(callee.get())) {
-        calleeStr = "(" + calleeStr + ")";
-    }
 
     std::stringstream ss;
     ss << calleeStr << "(";
@@ -549,7 +544,13 @@ bool If::check(const Gamma &gamma, const Delta &delta, const std::shared_ptr<Typ
 }
 
 std::string If::toString() const {
-    
+    std::stringstream ss;
+    ss << "If { "; 
+    ss << "guard: " << guard->toString() << ", ";
+    ss << "true: " << happyPath->toString() << ", ";
+    ss << "unhappyPath: " << (unhappyPath ? (*unhappyPath)->toString() : "<None>");
+    ss << " }";
+    return ss.str();
 }
 
 // While
@@ -656,11 +657,13 @@ void StructDefinition::check(const Gamma &gamma, const Delta &delta) const {
 std::string StructDefinition::toString() const {
     std::stringstream ss;
     ss << "Struct " << " { name \"" + name + "\", fields: {";
+    
     for (size_t i = 0; i < fields.size(); i++) {
         ss << fields[i].toString();
         if (i < fields.size() - 1)
             ss << ", ";
     }
+
     ss << "} }";
     return ss.str();
 }
@@ -668,14 +671,21 @@ std::string StructDefinition::toString() const {
 // Extern
 std::string Extern::toString() const {
     std::stringstream ss;
-    ss << "Extern { name: \"" << name << "\", prms: [";
+    ss << "Extern { ";
+    ss << "name: \"" << name << "\", "; 
+    
+    ss << "params: [";
+    
     for (size_t i = 0; i < paramTypes.size(); i++) {
         ss << paramTypes[i]->toString();
         if (i < paramTypes.size() - 1) {
             ss << ", ";
         }
     }
-    ss << "], rettyp: " << returnType->toString() << " }";
+
+    ss << "], "; 
+    ss << "returnType: " << returnType->toString() << " }";
+    
     return ss.str();
 }
 
@@ -733,19 +743,29 @@ void FunctionDefinition::check(const Gamma &gamma, const Delta &delta) const {
 
 std::string FunctionDefinition::toString() const {
     std::stringstream ss;
-    ss << "Function { name: \"" << name << "\", prms: [";
+    ss << "Function { name: \"" << name << "\", "; 
+    ss << " params: [";
+    
     for (size_t i = 0; i < params.size(); i++) {
         ss << params[i].toString();
         if (i < params.size() - 1)
             ss << ", ";
     }
-    ss << "], rettyp: " << returnType << ", locals: {";
+    
+    ss << "], "; 
+    ss << "returnType: " << returnType << ", "; 
+    
+    ss << "locals: {";
+    
     for (size_t i = 0; i < locals.size(); i++) {
         ss << locals[i].toString();
         if (i < locals.size() - 1)
             ss << ", ";
     }
-    ss << "}, " << "body: " << body->toString() << " }";
+
+    ss << "}, ";
+    ss << "body: " << body->toString() << " }";
+    
     return ss.str();
 }
 
@@ -800,24 +820,31 @@ void Program::check() const {
 
 std::string Program::toString() const {
     std::stringstream ss;
-    ss << "Program { structs: {";
-    for (size_t i = 0; i < structs.size(); i++) {
+    ss << "Program { ";
+
+    ss << "structs: { ";
+    
+    for (size_t i = 0; i < structs.size(); i++) {    
         ss << structs[i]->toString();
-        if (i < structs.size() - 1)
-            ss << ", ";
+        if (i < structs.size() - 1) ss << ", ";
     }
-    ss << "}, externs: {";
+    
+    ss << "}, ";
+    ss << "externs: {";
+    
     for (size_t i = 0; i < externs.size(); i++) {
         ss << externs[i].toString();
-        if (i < externs.size() - 1)
-            ss << ", ";
+        if (i < externs.size() - 1) ss << ", ";
     }
-    ss << "}, functions: {";
+    
+    ss << "}, "; 
+    ss << "functions: {";
+    
     for (size_t i = 0; i < functions.size(); i++) {
         ss << functions[i]->toString();
-        if (i < functions.size() - 1)
-            ss << ", ";
+        if (i < functions.size() - 1) ss << ", ";
     }
-    ss << "}}";
+
+    ss << "} }";
     return ss.str();
 }

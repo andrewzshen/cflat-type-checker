@@ -31,6 +31,8 @@ int main(int argc, char *argv[]) {
         std::unique_ptr<Program> program = buildProgram(json);
         program->check();
         std::cout << "valid" << std::endl;
+    } catch (const std::runtime_error &e) {
+        std::cout << "invalid: " << e.what() << std::endl;  
     } catch (const std::exception &e) {
         std::cerr << "Error: " << e.what() << std::endl;
     } 

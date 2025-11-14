@@ -230,7 +230,6 @@ struct FunctionCall: Node {
 // ------------------------------------ Statements --------------------------------
 struct Statement : public Node {
     virtual bool check(const Gamma &gamma, const Delta &delta, const std::shared_ptr<Type> &returnType, bool inLoop) const = 0;
-    std::string toString() const override;
 };
 
 struct Statements : public Statement {

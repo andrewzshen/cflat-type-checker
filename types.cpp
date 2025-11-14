@@ -81,9 +81,10 @@ std::string FunctionType::toString() const {
     ss << "(";
     for (size_t i = 0; i < paramTypes.size(); i++) {
         ss << paramTypes[i]->toString();
-        ss << (i == paramTypes.size() - 1 ? "" : ",");
+        ss << (i == paramTypes.size() - 1 ? "" : ", ");
     }
     ss << ")";
+    ss << " -> " << returnType->toString();
     return ss.str();
 }
 

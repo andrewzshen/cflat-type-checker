@@ -7,11 +7,13 @@ std::shared_ptr<Type> buildType(const nlohmann::json &json) {
     if (json.is_string()) {
         const std::string &kind = json.get<std::string>();
         
-        if (kind == "Int")
+        if (kind == "Int") {
             return std::make_shared<IntType>();
+        }
         
-        if (kind == "Nil")
+        if (kind == "Nil") {
             return std::make_shared<NilType>();
+        }
         
         throw std::runtime_error("Unknown simple type string: " + kind);
     }
@@ -48,10 +50,14 @@ std::shared_ptr<Type> buildType(const nlohmann::json &json) {
 
         if (json.contains("kind")) {
             const std::string &kind = json.at("kind").get<std::string>();
-            if (kind == "Int")
+            
+            if (kind == "Int") {
                 return std::make_shared<IntType>();
-            if (kind == "Nil")
+            }
+            
+            if (kind == "Nil") {
                 return std::make_shared<NilType>();
+            }
         }
     }
 
@@ -126,60 +132,64 @@ std::unique_ptr<Expression> buildExpression(const nlohmann::json &json) {
         if (!value.is_object() || !value.contains("guard") || !value.contains("tt") || !value.contains("ff")) {
             throw std::runtime_error("Invalid JSON for Select content");
         }
-        return std::make_unique<Select>(buildExpression(value.at("guard")),
-                                        buildExpression(value.at("tt")),
-                                        buildExpression(value.at("ff")));
+        return std::make_unique<Select>(buildExpression(value.at("guard")), buildExpression(value.at("tt")), buildExpression(value.at("ff")));
     }
     if (key == "UnOp") { 
         if (!value.is_array() || value.size() != 2) {
             throw std::runtime_error("Invalid JSON for UnOp content: Expected 2-element array [op, exp]");
         }
+        
         if (!value[0].is_string()) {
             throw std::runtime_error("Invalid JSON for UnOp content: Operator name must be a string");
         }
 
         UnaryOperand operand;
         std::string opStr = value[0].get<std::string>();
-        if (opStr == "Neg")
+        
+        if (opStr == "Neg") {
             operand = UnaryOperand::NEG;
-        else if (opStr == "Not")
+        } else if (opStr == "Not") {
             operand = UnaryOperand::NOT;
-        else
+        } else {
             throw std::runtime_error("Unknown unary operator: " + opStr);
+        }
         return std::make_unique<UnaryOperation>(operand, buildExpression(value[1]));
     }
     if (key == "BinOp") {
         if (!value.is_object() || !value.contains("op") || !value.contains("left") || !value.contains("right")) {
             throw std::runtime_error("Invalid JSON for BinaryOperation content");
         }
+        
         BinaryOperand operand;
         std::string opStr = value.at("op").get<std::string>();
-        if (opStr == "Add")
+        
+        if (opStr == "Add") { 
             operand = BinaryOperand::ADD;
-        else if (opStr == "Sub")
+        } else if (opStr == "Sub") {
             operand = BinaryOperand::SUB;
-        else if (opStr == "Mul")
+        } else if (opStr == "Mul") {
             operand = BinaryOperand::MUL;
-        else if (opStr == "Div")
+        } else if (opStr == "Div") {
             operand = BinaryOperand::DIV;
-        else if (opStr == "And")
+        } else if (opStr == "And") {
             operand = BinaryOperand::AND;
-        else if (opStr == "Or")
+        } else if (opStr == "Or") {
             operand = BinaryOperand::OR;
-        else if (opStr == "Eq")
+        } else if (opStr == "Eq") {
             operand = BinaryOperand::EQ;
-        else if (opStr == "NotEq")
+        } else if (opStr == "NotEq") {
             operand = BinaryOperand::NOT_EQ;
-        else if (opStr == "Lt")
+        } else if (opStr == "Lt") {
             operand = BinaryOperand::LT;
-        else if (opStr == "Lte")
+        } else if (opStr == "Lte") {
             operand = BinaryOperand::LTE;
-        else if (opStr == "Gt")
+        } else if (opStr == "Gt") {
             operand = BinaryOperand::GT;
-        else if (opStr == "Gte")
+        } else if (opStr == "Gte") {
             operand = BinaryOperand::GTE;
-        else
+        } else {
             throw std::runtime_error("Unknown binary operator: " + opStr);
+        }
         return std::make_unique<BinaryOperation>(operand, buildExpression(value.at("left")), buildExpression(value.at("right")));
     }
     
@@ -191,6 +201,7 @@ std::unique_ptr<Expression> buildExpression(const nlohmann::json &json) {
         if (!value.is_array() || value.size() != 2) {
             throw std::runtime_error("Invalid JSON for NewArray content: Expected 2-element array [Type, Exp]");
         }
+        
         auto type = buildType(value[0]);
         auto sizeExp = buildExpression(value[1]);
         return std::make_unique<NewArray>(std::move(type), std::move(sizeExp));
@@ -353,7 +364,7 @@ std::unique_ptr<FunctionDefinition> buildFunctionDefintion(const nlohmann::json 
     return function;
 }
 
-std::unique_ptr<StructDefinition> buildStructDef(const nlohmann::json &json) {
+std::unique_ptr<StructDefinition> buildStructDefinition(const nlohmann::json &json) {
     if (!json.is_object() || !json.contains("name") || !json.contains("fields") || !json.at("fields").is_array()) {
         throw std::runtime_error("Invalid JSON for Struct definition");
     }
