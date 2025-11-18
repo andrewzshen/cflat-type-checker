@@ -107,6 +107,7 @@ enum class UnaryOperand {
     NEG, 
     NOT 
 };
+extern std::unordered_map<UnaryOperand, std::string> unaryOperandToString;
 
 struct UnaryOperation : public Expression {
     UnaryOperand operand;
@@ -132,6 +133,7 @@ enum class BinaryOperand {
     GT,
     GTE
 };
+extern std::unordered_map<BinaryOperand, std::string> binaryOperandToString;
 
 struct BinaryOperation : public Expression {
     BinaryOperand operand;

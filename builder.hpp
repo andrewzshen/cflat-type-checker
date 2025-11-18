@@ -1,5 +1,5 @@
-#ifndef CHECKER_HPP
-#define CHECKER_HPP
+#ifndef BUILDER_HPP
+#define BUILDER_HPP
 
 #include "json.hpp"
 #include "types.hpp"
@@ -16,7 +16,7 @@ extern Extern buildExtern(const nlohmann::json &json);
 extern std::unique_ptr<Program> buildProgram(const nlohmann::json &json);
 extern std::unique_ptr<FunctionCall> buildFunctionCall(const nlohmann::json &json);
 
-Gamma constructGamma(const std::vector<Extern>& externs, const std::vector<std::unique_ptr<FunctionDefinition>> &functions);
+Gamma constructGamma(const std::vector<Extern> &externs, const std::vector<std::unique_ptr<FunctionDefinition>> &functions);
 Delta constructDelta(const std::vector<std::unique_ptr<StructDefinition>> &structs);
 
 #endif

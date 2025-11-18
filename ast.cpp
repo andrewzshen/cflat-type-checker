@@ -2,12 +2,27 @@
 #include <set>
 
 #include "ast.hpp"
-#include "checker.hpp"
+#include "builder.hpp"
 
-static inline bool isLowPrecedence(const Expression *exp) {
-    if (!exp) return false;
-    return dynamic_cast<const BinaryOperation*>(exp) || dynamic_cast<const Select*>(exp);
-}
+std::unordered_map<UnaryOperand, std::string> unaryOperandToString = {
+    { UnaryOperand::NEG, "-" },
+    { UnaryOperand::NOT, "not" },
+};
+
+std::unordered_map<BinaryOperand, std::string> binaryOperandToString = {
+    { BinaryOperand::ADD, "+" },  
+    { BinaryOperand::SUB, "-" }, 
+    { BinaryOperand::MUL, "*" },
+    { BinaryOperand::DIV, "/" }, 
+    { BinaryOperand::AND, "and" }, 
+    { BinaryOperand::OR, "or" }, 
+    { BinaryOperand::EQ, "==" }, 
+    { BinaryOperand::NOT_EQ, "!=" }, 
+    { BinaryOperand::LT, "<" }, 
+    { BinaryOperand::LTE, "<=" }, 
+    { BinaryOperand::GT, ">" },
+    { BinaryOperand::GTE, ">=" },
+};
 
 /* Declaration */
 Declaration::Declaration(std::string name, std::shared_ptr<Type> type) {
@@ -31,7 +46,7 @@ std::shared_ptr<Type> Value::check(const Gamma &gamma, const Delta &delta) const
 }
 
 std::string Value::toString() const {
-    return "Val(" + place->toString() + ")";
+    return place->toString();
 }
 
 // Number
@@ -87,7 +102,41 @@ std::shared_ptr<Type> Select::check(const Gamma &gamma, const Delta &delta) cons
 }
 
 std::string Select::toString() const {
-    return "Select { guard: " + guard->toString() + ", true: " + happyCase->toString() + ", false: " + unhappyCase->toString() + " }";
+    std::string guardStr = guard->toString();
+    std::string happyCaseStr = happyCase->toString();
+    std::string unhappyCaseStr = unhappyCase->toString();
+    
+    if (const BinaryOperation *guardBinOp = dynamic_cast<const BinaryOperation*>(guard.get())) {
+        bool lhsIsSelect = dynamic_cast<const Select*>(guardBinOp->lhs.get()) != nullptr;
+        bool rhsIsSelect = dynamic_cast<const Select*>(guardBinOp->rhs.get()) != nullptr;
+        
+        if (lhsIsSelect || rhsIsSelect) {
+            std::string op = binaryOperandToString[guardBinOp->operand];
+            std::string lhsStr = guardBinOp->lhs->toString();
+            std::string rhsStr = guardBinOp->rhs->toString();
+            
+            if (lhsIsSelect) {
+                lhsStr = "(" + lhsStr + ")";
+            }
+
+            if (rhsIsSelect) {
+                rhsStr = "(" + rhsStr + ")";
+            }
+            
+                    
+            guardStr = lhsStr + " " + op + " " + rhsStr;
+        }
+    }
+    
+    if (dynamic_cast<const Select*>(happyCase.get())) {
+        happyCaseStr = "(" + happyCaseStr + ")";
+    }
+    
+    if (dynamic_cast<const Select*>(unhappyCase.get())) {
+        unhappyCaseStr = "(" + unhappyCaseStr + ")";
+    }
+    
+    return guardStr + " ? " + happyCaseStr + " : " + unhappyCaseStr;
 }
 
 UnaryOperation::UnaryOperation(UnaryOperand operand, std::unique_ptr<Expression> expression) {
@@ -106,18 +155,12 @@ std::shared_ptr<Type> UnaryOperation::check(const Gamma &gamma, const Delta &del
 }
 
 std::string UnaryOperation::toString() const {
-    std::string op;
-    switch (operand) {
-        case UnaryOperand::NEG:
-            op = "- ";
-            break;
-        case UnaryOperand::NOT:
-            op = "not ";
-            break;
-    }
-
-    std::string str = expression ? expression->toString() : "<null>";
-    return op + "(" + str + ")";
+    std::string op = unaryOperandToString[operand] + (operand != UnaryOperand::NEG ? " " : "");
+    std::string expStr = expression->toString();
+    return (dynamic_cast<const BinaryOperation*>(expression.get()) || 
+            dynamic_cast<const Select*>(expression.get())) ? 
+        op + "(" + expStr + ")" : 
+        op + expStr;
 }
 
 BinaryOperation::BinaryOperation(BinaryOperand operand, std::unique_ptr<Expression> lhs, std::unique_ptr<Expression> rhs) {
@@ -136,11 +179,11 @@ std::shared_ptr<Type> BinaryOperation::check(const Gamma &gamma, const Delta &de
         }
         
         if (dynamic_cast<StructType*>(lhsType.get()) || dynamic_cast<FunctionType*>(lhsType.get())) {
-             throw std::runtime_error("invalid type " + lhsType->toString() + " used in binary op '" + toString() + "'");
+            throw std::runtime_error("invalid type " + lhsType->toString() + " used in binary op '" + toString() + "'");
         }
         
         if (dynamic_cast<StructType*>(rhsType.get()) || dynamic_cast<FunctionType*>(rhsType.get())) {
-             throw std::runtime_error("invalid type " + rhsType->toString() + " used in binary op '" + toString() + "'");
+            throw std::runtime_error("invalid type " + rhsType->toString() + " used in binary op '" + toString() + "'");
         }
     } else {
         if (!typesEqual(lhsType, std::make_shared<IntType>())) {
@@ -156,54 +199,15 @@ std::shared_ptr<Type> BinaryOperation::check(const Gamma &gamma, const Delta &de
 }
 
 std::string BinaryOperation::toString() const {
-    std::string op;
-    switch (operand) {
-        case BinaryOperand::ADD:
-            op = " + ";
-            break;
-        case BinaryOperand::SUB:
-            op = " - ";
-            break;
-        case BinaryOperand::MUL:
-            op = " * ";
-            break;
-        case BinaryOperand::DIV:
-            op = " / ";
-            break;
-        case BinaryOperand::EQ:
-            op = " == ";
-            break;
-        case BinaryOperand::NOT_EQ:
-            op = " != ";
-            break;
-        case BinaryOperand::LT:
-            op = " < ";
-            break;
-        case BinaryOperand::LTE:
-            op = " <= ";
-            break;
-        case BinaryOperand::GT:
-            op = " > ";
-            break;
-        case BinaryOperand::GTE:
-            op = " >= ";
-            break;
-        case BinaryOperand::AND:
-            op = " and ";
-            break;
-        case BinaryOperand::OR:
-            op = " or ";
-            break;
-    }
-
-    std::string left = lhs ? lhs->toString() : "<null>";
-    std::string right = rhs ? rhs->toString() : "<null>";
+    std::string op = binaryOperandToString[operand];
+    std::string lhsStr = lhs->toString();
+    std::string rhsStr = rhs->toString();
     
     if (dynamic_cast<const Select*>(rhs.get())) {
-        right = "(" + right + ")";
+        rhsStr = "(" + rhsStr + ")";
     }
     
-    return left + op + right;
+    return lhsStr + " " + op + " " + rhsStr;
 }
 
 // NewSingleton
@@ -243,7 +247,30 @@ std::shared_ptr<Type> NewArray::check(const Gamma &gamma, const Delta &delta) co
 }
 
 std::string NewArray::toString() const {
-    return "NewArray(" + type->toString() + ", " + size->toString() + ")";
+    std::string sizeStr = size->toString();
+    
+    if (const BinaryOperation *sizeBinOp = dynamic_cast<const BinaryOperation*>(size.get())) {
+        bool lhsIsSelect = dynamic_cast<const Select*>(sizeBinOp->lhs.get()) != nullptr;
+        bool rhsIsSelect = dynamic_cast<const Select*>(sizeBinOp->rhs.get()) != nullptr;
+        
+        if (lhsIsSelect || rhsIsSelect) {
+            std::string op = binaryOperandToString[sizeBinOp->operand];
+            std::string lhsStr = sizeBinOp->lhs->toString();
+            std::string rhsStr = sizeBinOp->rhs->toString();
+
+            if (lhsIsSelect) {
+                lhsStr = "(" + lhsStr + ")";
+            }
+            
+            if (rhsIsSelect) {
+                rhsStr = "(" + rhsStr + ")";
+            }
+
+            sizeStr = lhsStr + " " + op + " " + rhsStr;
+        }
+    }
+    
+    return "[" + type->toString() + "; " + sizeStr + "]";
 }
 
 // CallExpression
@@ -277,7 +304,7 @@ std::shared_ptr<Type> Identifier::check(const Gamma &gamma, const Delta &delta) 
 }
 
 std::string Identifier::toString() const {
-    return "Id(\"" + name + "\")";
+    return name;
 }
 
 // Dereference
@@ -296,7 +323,23 @@ std::shared_ptr<Type> Dereference::check(const Gamma &gamma, const Delta &delta)
 }
 
 std::string Dereference::toString() const {
-    return "Deref(" + expression->toString() + ")";
+    std::string expStr = expression->toString();
+    
+    const Node *checkExp = expression.get();
+    if (auto valueNode = dynamic_cast<const Value*>(checkExp)) {
+        checkExp = valueNode->place.get();
+    }
+    
+    if (dynamic_cast<const BinaryOperation*>(expression.get()) || 
+        dynamic_cast<const Select*>(expression.get()) ||
+        dynamic_cast<const NewArray*>(expression.get()) ||
+        dynamic_cast<const NewSingleton*>(expression.get()) ||
+        (dynamic_cast<const ArrayAccess*>(checkExp) && dynamic_cast<const Value*>(expression.get())) ||
+        (dynamic_cast<const FieldAccess*>(checkExp) && dynamic_cast<const Value*>(expression.get()))) {
+        expStr = "(" + expStr + ")";
+    }
+    
+    return expStr + ".*";
 }
 
 // ArrayAccess
@@ -325,7 +368,24 @@ std::shared_ptr<Type> ArrayAccess::check(const Gamma &gamma, const Delta &delta)
 }
 
 std::string ArrayAccess::toString() const {
-    return "ArrayAccess { array: " + array->toString() + ", index: " + index->toString() + "}";
+    std::string arrayStr = array->toString();
+    std::string indexStr = index->toString();
+
+    if (dynamic_cast<const Select*>(array.get())) {
+        arrayStr = "(" + arrayStr + ")";
+    }
+    
+    if (const BinaryOperation *indexBinOp = dynamic_cast<const BinaryOperation*>(index.get())) {
+        if (dynamic_cast<const Select*>(indexBinOp->rhs.get()) != nullptr) {
+            std::string lhsStr = indexBinOp->lhs->toString();
+            std::string rhsStr = "(" + indexBinOp->rhs->toString() + ")";
+            std::string op = binaryOperandToString[indexBinOp->operand];
+            
+            indexStr = lhsStr + " " + op + " " + rhsStr;
+        }
+    }
+    
+    return arrayStr + "[" + indexStr + "]";
 }
 
 // FieldAccess
@@ -339,13 +399,13 @@ std::shared_ptr<Type> FieldAccess::check(const Gamma &gamma, const Delta &delta)
     auto pointerType = std::dynamic_pointer_cast<PointerType>(baseType);
 
     if (!pointerType) {
-        throw std::runtime_error("<" + baseType->toString() + "> is not a struct pointer type in field access '" + toString() + "'");
+        throw std::runtime_error(baseType->toString() + " is not a struct pointer type in field access '" + toString() + "'");
     }
     
     auto structPointerType = std::dynamic_pointer_cast<StructType>(pointerType->pointeeType);
     
     if (!structPointerType) {
-        throw std::runtime_error("pointer type <" + baseType->toString() + "> does not point to a struct in field access '" + toString() + "'");
+        throw std::runtime_error(baseType->toString() + " is not a struct pointer type in field access '" + toString() + "'");
     }
     
     if (!delta.count(structPointerType->name)) {
@@ -362,7 +422,7 @@ std::shared_ptr<Type> FieldAccess::check(const Gamma &gamma, const Delta &delta)
 }
 
 std::string FieldAccess::toString() const {
-    return "FieldAccess { ptr: " + pointer->toString() + ", field: \"" + field + "\" }";
+    return pointer->toString() + "." + field;
 }
 
 // Function call

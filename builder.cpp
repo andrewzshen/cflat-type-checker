@@ -1,7 +1,7 @@
 #include <stdexcept>
 
 #include "json.hpp"
-#include "checker.hpp"
+#include "builder.hpp"
 
 std::shared_ptr<Type> buildType(const nlohmann::json &json) {
     if (json.is_string()) {

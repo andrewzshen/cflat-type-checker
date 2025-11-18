@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 
-TESTDIR="assign-2-tests/ts1"
+if [[ -z "$1" ]]; then
+    echo "Usage: $0 <test-number>"
+    exit 1
+fi
+
+TESTDIR="assign-2-tests/ts$1"
 
 for ast in "$TESTDIR"/*.astj; do
     base=$(basename "$ast" .astj)
