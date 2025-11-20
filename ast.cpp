@@ -1,28 +1,61 @@
 #include <stdexcept>
 #include <set>
+#include <iostream>
 
 #include "ast.hpp"
 #include "builder.hpp"
 
-std::unordered_map<UnaryOperand, std::string> unaryOperandToString = {
-    { UnaryOperand::NEG, "-" },
-    { UnaryOperand::NOT, "not" },
-};
+static const std::shared_ptr<IntType> INT_TYPE = std::make_shared<IntType>(); 
+static const std::shared_ptr<NilType> NIL_TYPE = std::make_shared<NilType>(); 
 
-std::unordered_map<BinaryOperand, std::string> binaryOperandToString = {
-    { BinaryOperand::ADD, "+" },  
-    { BinaryOperand::SUB, "-" }, 
-    { BinaryOperand::MUL, "*" },
-    { BinaryOperand::DIV, "/" }, 
-    { BinaryOperand::AND, "and" }, 
-    { BinaryOperand::OR, "or" }, 
-    { BinaryOperand::EQ, "==" }, 
-    { BinaryOperand::NOT_EQ, "!=" }, 
-    { BinaryOperand::LT, "<" }, 
-    { BinaryOperand::LTE, "<=" }, 
-    { BinaryOperand::GT, ">" },
-    { BinaryOperand::GTE, ">=" },
-};
+constexpr std::string_view unaryOperandToString(UnaryOperand op) {
+    switch (op) {
+        case UnaryOperand::NEG: return "-";
+        case UnaryOperand::NOT: return "not";
+    }
+}
+
+constexpr std::string_view binaryOperandToString(BinaryOperand op) {
+    switch (op) {
+        case BinaryOperand::ADD:    return "+";  
+        case BinaryOperand::SUB:    return "-"; 
+        case BinaryOperand::MUL:    return "*";
+        case BinaryOperand::DIV:    return "/"; 
+        case BinaryOperand::AND:    return "and"; 
+        case BinaryOperand::OR:     return "or"; 
+        case BinaryOperand::EQ:     return "=="; 
+        case BinaryOperand::NOT_EQ: return "!="; 
+        case BinaryOperand::LT:     return "<";
+        case BinaryOperand::LTE:    return "<="; 
+        case BinaryOperand::GT:     return ">";
+        case BinaryOperand::GTE:    return ">=";
+    }
+}
+
+static int binaryPrecedence(BinaryOperand op) {
+    switch (op) {
+        case BinaryOperand::MUL:
+        case BinaryOperand::DIV:
+            return 6;
+        case BinaryOperand::ADD:
+        case BinaryOperand::SUB:
+            return 5;
+        case BinaryOperand::LT:
+        case BinaryOperand::LTE:
+        case BinaryOperand::GT:
+        case BinaryOperand::GTE:
+            return 4;
+        case BinaryOperand::EQ:
+        case BinaryOperand::NOT_EQ:
+            return 3;
+        case BinaryOperand::AND:
+            return 2;
+        case BinaryOperand::OR:
+            return 1;
+    }
+    
+    return 0;
+}
 
 /* Declaration */
 Declaration::Declaration(std::string name, std::shared_ptr<Type> type) {
@@ -31,7 +64,7 @@ Declaration::Declaration(std::string name, std::shared_ptr<Type> type) {
 }
 
 std::string Declaration::toString() const {
-    return "Decl { name: \"" + name + "\", typ: " + type->toString() + " }";
+    return type->toString() + " " + name;
 }
 
 /* Expressions */
@@ -55,7 +88,7 @@ Number::Number(long long value) {
 }
 
 std::shared_ptr<Type> Number::check(const Gamma &gamma, const Delta &delta) const { 
-    return std::make_shared<IntType>();
+    return INT_TYPE; 
 }
 
 std::string Number::toString() const { 
@@ -64,7 +97,7 @@ std::string Number::toString() const {
 
 // Nil
 std::shared_ptr<Type> Nil::check(const Gamma &gamma, const Delta &delta) const {
-    return std::make_shared<NilType>();
+    return NIL_TYPE; 
 }
 
 std::string Nil::toString() const {
@@ -111,7 +144,7 @@ std::string Select::toString() const {
         bool rhsIsSelect = dynamic_cast<const Select*>(guardBinOp->rhs.get()) != nullptr;
         
         if (lhsIsSelect || rhsIsSelect) {
-            std::string op = binaryOperandToString[guardBinOp->operand];
+            std::string op = binaryOperandToString(guardBinOp->operand);
             std::string lhsStr = guardBinOp->lhs->toString();
             std::string rhsStr = guardBinOp->rhs->toString();
             
@@ -122,7 +155,6 @@ std::string Select::toString() const {
             if (rhsIsSelect) {
                 rhsStr = "(" + rhsStr + ")";
             }
-            
                     
             guardStr = lhsStr + " " + op + " " + rhsStr;
         }
@@ -151,14 +183,13 @@ std::shared_ptr<Type> UnaryOperation::check(const Gamma &gamma, const Delta &del
         throw std::runtime_error("non-int operand type " + operandType->toString() + " in unary op '" + toString() + "'");
     }
 
-    return std::make_shared<IntType>();
+    return INT_TYPE; 
 }
 
 std::string UnaryOperation::toString() const {
-    std::string op = unaryOperandToString[operand] + (operand != UnaryOperand::NEG ? " " : "");
+    std::string op = unaryOperandToString[operand] + " ";
     std::string expStr = expression->toString();
-    return (dynamic_cast<const BinaryOperation*>(expression.get()) || 
-            dynamic_cast<const Select*>(expression.get())) ? 
+    return (dynamic_cast<const BinaryOperation*>(expression.get()) || dynamic_cast<const Select*>(expression.get())) ? 
         op + "(" + expStr + ")" : 
         op + expStr;
 }
@@ -169,40 +200,86 @@ BinaryOperation::BinaryOperation(BinaryOperand operand, std::unique_ptr<Expressi
     this->rhs = std::move(rhs);
 }
 
+static std::string toStringCompact(const Expression *exp);
+
 std::shared_ptr<Type> BinaryOperation::check(const Gamma &gamma, const Delta &delta) const {
     std::shared_ptr<Type> lhsType = lhs->check(gamma, delta);
     std::shared_ptr<Type> rhsType = rhs->check(gamma, delta);
 
     if (operand == BinaryOperand::EQ || operand == BinaryOperand::NOT_EQ) {
         if (!typesEqual(lhsType, rhsType)) {
-            throw std::runtime_error("incompatible types " + lhsType->toString() + " vs " + rhsType->toString() + " in binary op '" + toString() + "'");
+            throw std::runtime_error("incompatible types " + lhsType->toString() + " vs " + rhsType->toString() + " in binary op '" + toStringCompact(this) + "'");
         }
         
         if (dynamic_cast<StructType*>(lhsType.get()) || dynamic_cast<FunctionType*>(lhsType.get())) {
-            throw std::runtime_error("invalid type " + lhsType->toString() + " used in binary op '" + toString() + "'");
+            throw std::runtime_error("invalid type " + lhsType->toString() + " used in binary op '" + toStringCompact(this) + "'");
         }
         
         if (dynamic_cast<StructType*>(rhsType.get()) || dynamic_cast<FunctionType*>(rhsType.get())) {
-            throw std::runtime_error("invalid type " + rhsType->toString() + " used in binary op '" + toString() + "'");
+            throw std::runtime_error("invalid type " + rhsType->toString() + " used in binary op '" + toStringCompact(this) + "'");
         }
     } else {
         if (!typesEqual(lhsType, std::make_shared<IntType>())) {
-            throw std::runtime_error("non-int type " + lhsType->toString() + " for left operand of binary op '" + toString() + "'");
+            throw std::runtime_error("non-int type " + lhsType->toString() + " for left operand of binary op '" + toStringCompact(this) + "'");
         }
 
         if (!typesEqual(rhsType, std::make_shared<IntType>())) {
-            throw std::runtime_error("right operand of binary op '" + toString() + "' has type " + rhsType->toString() + ", should be int");
+            throw std::runtime_error("right operand of binary op '" + toStringCompact(this) + "' has type " + rhsType->toString() + ", should be int");
         }
     }
     
-    return std::make_shared<IntType>(); 
+    return INT_TYPE; 
+}
+
+static std::string toStringCompact(const Expression *exp) {
+    if (!exp) return "";
+    
+    if (const UnaryOperation *unOp = dynamic_cast<const UnaryOperation*>(exp)) {
+        std::string op = unaryOperandToString[unOp->operand] + (unOp->operand == UnaryOperand::NEG ? "" : " ");
+        std::string expStr = toStringCompact(unOp->expression.get());
+        return (dynamic_cast<const Select*>(unOp->expression.get()) || dynamic_cast<const BinaryOperation*>(unOp->expression.get())) ?
+            op + "(" + expStr + ")" :
+            op + expStr;
+    }
+    
+    if (const BinaryOperation *binOp = dynamic_cast<const BinaryOperation*>(exp)) {
+        std::string opStr = binaryOperandToString[binOp->operand];
+        std::string lhsStr = toStringCompact(binOp->lhs.get());
+        std::string rhsStr = toStringCompact(binOp->rhs.get());
+        
+        int thisPrecedence = binaryPrecedence(binOp->operand);
+        
+        if (const BinaryOperation *lhsBinOp = dynamic_cast<const BinaryOperation*>(binOp->lhs.get())) {
+            int lhsPrecedence = binaryPrecedence(lhsBinOp->operand);
+            if (lhsPrecedence < thisPrecedence) {
+                lhsStr = "(" + lhsStr + ")";
+            }
+        }
+        
+        if (const BinaryOperation *rhsBinOp = dynamic_cast<const BinaryOperation*>(binOp->rhs.get())) {
+            int rhsPrecedence = binaryPrecedence(rhsBinOp->operand);
+            bool needsParens = rhsPrecedence < thisPrecedence;
+            
+            if (!needsParens && (rhsPrecedence == thisPrecedence) && (thisPrecedence == 4)) {
+                needsParens = true;
+            }
+            
+            if (needsParens) {
+                rhsStr = "(" + rhsStr + ")";
+            }
+        }
+        
+        return lhsStr + " " + opStr + " " + rhsStr;
+    }
+    
+    return exp->toString();
 }
 
 std::string BinaryOperation::toString() const {
-    std::string op = binaryOperandToString[operand];
+    std::string op = binaryOperandToString(operand);
     std::string lhsStr = lhs->toString();
     std::string rhsStr = rhs->toString();
-    
+
     if (dynamic_cast<const Select*>(rhs.get())) {
         rhsStr = "(" + rhsStr + ")";
     }
@@ -254,7 +331,7 @@ std::string NewArray::toString() const {
         bool rhsIsSelect = dynamic_cast<const Select*>(sizeBinOp->rhs.get()) != nullptr;
         
         if (lhsIsSelect || rhsIsSelect) {
-            std::string op = binaryOperandToString[sizeBinOp->operand];
+            std::string op = binaryOperandToString(sizeBinOp->operand);
             std::string lhsStr = sizeBinOp->lhs->toString();
             std::string rhsStr = sizeBinOp->rhs->toString();
 
@@ -319,7 +396,7 @@ std::shared_ptr<Type> Dereference::check(const Gamma &gamma, const Delta &delta)
         return pointerType->pointeeType;
     }
 
-    throw std::runtime_error("non-pointer type " + pointee->toString() + " for dereference '" + expression->toString() + ".*'");
+    throw std::runtime_error("non-pointer type " + pointee->toString() + " for dereference '" + toStringCompact(expression.get()) + ".*'");
 }
 
 std::string Dereference::toString() const {
@@ -352,7 +429,7 @@ std::shared_ptr<Type> ArrayAccess::check(const Gamma &gamma, const Delta &delta)
     std::shared_ptr<Type> arrayType = array->check(gamma, delta); 
     std::shared_ptr<Type> indexType = index->check(gamma, delta); 
 
-    if (!typesEqual(indexType, std::make_shared<IntType>())) {
+    if (!typesEqual(indexType, INT_TYPE)) {
         throw std::runtime_error("non-int index type " + indexType->toString() + " for array access '" + array->toString() + "'");
     }
 
@@ -360,7 +437,7 @@ std::shared_ptr<Type> ArrayAccess::check(const Gamma &gamma, const Delta &delta)
         return actualArrayType->elementType;
     }
     
-    if (typesEqual(arrayType, std::make_shared<NilType>())) {
+    if (typesEqual(arrayType, NIL_TYPE)) {
         throw std::runtime_error("non-array type " + arrayType->toString() + " for array access '" + array->toString() + "'");
     }
 
@@ -379,7 +456,7 @@ std::string ArrayAccess::toString() const {
         if (dynamic_cast<const Select*>(indexBinOp->rhs.get()) != nullptr) {
             std::string lhsStr = indexBinOp->lhs->toString();
             std::string rhsStr = "(" + indexBinOp->rhs->toString() + ")";
-            std::string op = binaryOperandToString[indexBinOp->operand];
+            std::string op = binaryOperandToString(indexBinOp->operand);
             
             indexStr = lhsStr + " " + op + " " + rhsStr;
         }
@@ -493,11 +570,12 @@ std::string FunctionCall::toString() const {
 
     std::stringstream ss;
     ss << calleeStr << "(";
+    
     for (size_t i = 0; i < args.size(); i++) {
         ss << args[i]->toString();
-        if (i < args.size() - 1)
-            ss << ", ";
+        if (i < args.size() - 1) ss << ", ";
     }
+
     ss << ")";
     return ss.str();
 }
@@ -522,11 +600,13 @@ bool Statements::check(const Gamma &gamma, const Delta &delta, const std::shared
 std::string Statements::toString() const {
     std::stringstream ss;
     ss << "[";
+    
     for (size_t i = 0; i < statements.size(); i++) {
         ss << statements[i]->toString();
         if (i < statements.size())
             ss << ", ";
     }
+
     ss << "]";
     return ss.str();
 }
@@ -716,7 +796,7 @@ void StructDefinition::check(const Gamma &gamma, const Delta &delta) const {
 
 std::string StructDefinition::toString() const {
     std::stringstream ss;
-    ss << "Struct " << " { name \"" + name + "\", fields: {";
+    ss << name << " {";
     
     for (size_t i = 0; i < fields.size(); i++) {
         ss << fields[i].toString();
@@ -724,7 +804,8 @@ std::string StructDefinition::toString() const {
             ss << ", ";
     }
 
-    ss << "} }";
+    ss << "}";
+    
     return ss.str();
 }
 
@@ -906,5 +987,6 @@ std::string Program::toString() const {
     }
 
     ss << "} }";
+    
     return ss.str();
 }
