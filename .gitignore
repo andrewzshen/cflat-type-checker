@@ -41,5 +41,6 @@
 *.dwo
 
 .clang-format
+.clangd
 
 \assign-2-tests

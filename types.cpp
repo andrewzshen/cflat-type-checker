@@ -4,49 +4,48 @@
 
 /* Helper functions */
 bool typesEqual(const std::shared_ptr<Type> &lhs, const std::shared_ptr<Type> &rhs) {
-    if (!lhs || !rhs) return false;
-    if (dynamic_cast<const NilType*>(lhs.get())) {
-        return dynamic_cast<const NilType*>(rhs.get()) != nullptr ||
-               dynamic_cast<const ArrayType*>(rhs.get()) != nullptr ||
-               dynamic_cast<const PointerType*>(rhs.get()) != nullptr;
-    }
-    if (dynamic_cast<const NilType*>(rhs.get())) {
-        return dynamic_cast<const ArrayType*>(lhs.get()) != nullptr || 
-               dynamic_cast<const PointerType *>(lhs.get()) != nullptr;
-    }
-    return lhs->equals(*rhs);
-}
-
-bool typePointersEqual(const std::shared_ptr<Type> &lhs, const std::shared_ptr<Type> &rhs) {
     if (!lhs && !rhs) return true;
     if (!lhs || !rhs) return false;
     return lhs->equals(*rhs);
-}
-
-std::shared_ptr<Type> pickNonNil(const std::shared_ptr<Type> &lhs, const std::shared_ptr<Type> &rhs) {
-    return !dynamic_cast<const NilType*>(lhs.get()) ? lhs : rhs;
 }
 
 /* Type definitions */
 
 // IntType
 std::string IntType::toString() const {
+    return "Int";
+}
+
+std::string IntType::toStringPretty() const {
     return "int";
 }
 
 bool IntType::equals(const Type &other) const {
-    return dynamic_cast<const IntType*>(&other) != nullptr;
+    return other.getTypeKind() == TypeKind::INT;
 }
 
-std::string NilType::toString() const {
-    return "nil";
+TypeKind IntType::getTypeKind() const {
+    return TypeKind::INT;
 }
 
 // NilType
+std::string NilType::toString() const {
+    return "Nil";
+}
+
+std::string NilType::toStringPretty() const {
+    return "nil";
+}
+
 bool NilType::equals(const Type &other) const {
-    return dynamic_cast<const NilType*>(&other) != nullptr ||
-           dynamic_cast<const ArrayType*>(&other) != nullptr || 
-           dynamic_cast<const PointerType*>(&other) != nullptr;
+    const TypeKind otherTypeKind = other.getTypeKind();
+    return otherTypeKind == TypeKind::NIL || 
+           otherTypeKind == TypeKind::ARRAY || 
+           otherTypeKind == TypeKind::POINTER;
+}
+
+TypeKind NilType::getTypeKind() const {
+    return TypeKind::NIL;
 }
 
 // StructType
@@ -55,14 +54,20 @@ StructType::StructType(std::string name) {
 }
 
 std::string StructType::toString() const {
+    return "Struct(\"" + name + "\")";
+}
+
+std::string StructType::toStringPretty() const {
     return name;
 }
 
 bool StructType::equals(const Type &other) const {
-    if (dynamic_cast<const NilType*>(&other)) return false;
-    
-    const StructType *otherStruct = dynamic_cast<const StructType*>(&other);
-    return otherStruct ? name == otherStruct->name : false;
+    if (other.getTypeKind() != TypeKind::STRUCT) return false; 
+    return name == dynamic_cast<const StructType*>(&other)->name;
+}
+
+TypeKind StructType::getTypeKind() const {
+    return TypeKind::STRUCT;
 }
 
 // ArrayType
@@ -71,14 +76,21 @@ ArrayType::ArrayType(std::shared_ptr<Type> elementType) {
 }
 
 std::string ArrayType::toString() const {
-    return elementType ? "[" + elementType->toString() + "]" : "[<null>]";
+    return "Array(" + elementType->toString() + ")";
+}
+
+std::string ArrayType::toStringPretty() const {
+    return elementType ? "[" + elementType->toStringPretty() + "]" : "[<null>]";
 }
 
 bool ArrayType::equals(const Type &other) const {
-    if (dynamic_cast<const NilType*>(&other)) return true;
+    if (other.getTypeKind() == TypeKind::NIL) return true;
+    if (other.getTypeKind() != TypeKind::ARRAY) return false;
+    return typesEqual(elementType, dynamic_cast<const ArrayType*>(&other)->elementType);  
+}
 
-    const ArrayType* otherArray = dynamic_cast<const ArrayType*>(&other);
-    return otherArray ? typePointersEqual(elementType, otherArray->elementType) : false;  
+TypeKind ArrayType::getTypeKind() const {
+    return TypeKind::ARRAY;
 }
 
 // PointerType
@@ -87,14 +99,21 @@ PointerType::PointerType(std::shared_ptr<Type> pointeeType) {
 }
     
 std::string PointerType::toString() const { 
-    return pointeeType ? "&" + pointeeType->toString() : "ptr(<null>)";
+    return "Ptr(" + (pointeeType ? pointeeType->toString() : "<null>") + ")";
+};
+
+std::string PointerType::toStringPretty() const { 
+    return "&" + (pointeeType ? pointeeType->toStringPretty() : "<null>");
 };
 
 bool PointerType::equals(const Type &other) const {
-    if (dynamic_cast<const NilType*>(&other)) return true;
-    
-    const PointerType *otherPointer = dynamic_cast<const PointerType*>(&other);
-    return otherPointer ? typePointersEqual(pointeeType, otherPointer->pointeeType) : false;
+    if (other.getTypeKind() == TypeKind::NIL) return true;
+    if (other.getTypeKind() != TypeKind::POINTER) return false; 
+    return typesEqual(pointeeType, dynamic_cast<const PointerType*>(&other)->pointeeType);
+}
+
+TypeKind PointerType::getTypeKind() const {
+    return TypeKind::POINTER;
 }
 
 // FunctionType
@@ -105,30 +124,48 @@ FunctionType::FunctionType(std::vector<std::shared_ptr<Type>> paramTypes, std::s
     
 std::string FunctionType::toString() const {
     std::stringstream ss;
-    ss << "(";
+    ss << "Fn(";
+    ss << "[";
 
     for (size_t i = 0; i < paramTypes.size(); i++) {
         ss << paramTypes[i]->toString();
         ss << (i == paramTypes.size() - 1 ? "" : ", ");
     }
 
+    ss << "]";
+    ss << ", " << returnType->toString();
     ss << ")";
-    ss << " -> " << returnType->toString();
+    return ss.str();
+}
+
+std::string FunctionType::toStringPretty() const {
+    std::stringstream ss;
+    ss << "(";
+
+    for (size_t i = 0; i < paramTypes.size(); i++) {
+        ss << paramTypes[i]->toStringPretty();
+        ss << (i == paramTypes.size() - 1 ? "" : ", ");
+    }
+
+    ss << ")";
+    ss << " -> " << returnType->toStringPretty();
     return ss.str();
 }
 
 bool FunctionType::equals(const Type &other) const {
-    if (dynamic_cast<const NilType*>(&other)) return false;
+    if (other.getTypeKind() != TypeKind::FUNCTION) return false;
     
-    if (const FunctionType *otherFunction = dynamic_cast<const FunctionType*>(&other)) {
-        if (paramTypes.size() != otherFunction->paramTypes.size()) return false;
-        
-        for (size_t i = 0; i < paramTypes.size(); i++) {
-            if (!typePointersEqual(paramTypes[i], otherFunction->paramTypes[i])) return false;
-        }
-
-        return typePointersEqual(returnType, otherFunction->returnType);
+    const FunctionType *otherFunction = dynamic_cast<const FunctionType*>(&other);
+    
+    if (paramTypes.size() != otherFunction->paramTypes.size()) return false;
+    
+    for (size_t i = 0; i < paramTypes.size(); i++) {
+        if (!typesEqual(paramTypes[i], otherFunction->paramTypes[i])) return false;
     }
-    
-    return false;
+
+    return typesEqual(returnType, otherFunction->returnType);
+}
+
+TypeKind FunctionType::getTypeKind() const { 
+    return TypeKind::FUNCTION;
 }

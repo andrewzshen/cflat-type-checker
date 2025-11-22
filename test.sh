@@ -5,11 +5,18 @@ if [[ -z "$1" ]]; then
     exit 1
 fi
 
-TESTDIR="assign-2-tests/ts$1"
+TESTS_DIR="assign-2-tests/ts$1"
 
-for ast in "$TESTDIR"/*.astj; do
+if [[ ! -d "$TESTS_DIR" ]]; then
+    echo "Error: directory '$TESTS_DIR' does not exist"
+    exit 1
+fi
+
+TESTS=( $(ls "$TESTS_DIR"/*.astj | sort -V) )
+
+for ast in "${TESTS[@]}"; do
     base=$(basename "$ast" .astj)
-    soln="$TESTDIR/$base.soln"
+    soln="$TESTS_DIR/$base.soln"
 
     output=$(./type "$ast")
 
@@ -18,7 +25,7 @@ for ast in "$TESTDIR"/*.astj; do
     if [[ $? -eq 0 ]]; then
         echo "passed: $base"
     else
-        echo "failed: $base"
+        echo "FAILED: $base"
         echo "----- diff -----"
         echo "$diff_output"
         echo "----------------"

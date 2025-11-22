@@ -4,6 +4,7 @@
 #include <optional>
 
 #include "types.hpp"
+#include "visitor.hpp"
 
 // Node
 struct Node;
@@ -15,6 +16,7 @@ struct Declaration;
 struct Expression;
 struct Value;
 struct Number;
+struct Nil;
 struct Select;
 struct UnaryOperation;
 struct BinaryOperation;
@@ -25,7 +27,7 @@ struct CallExpression;
 // Places
 struct Place;
 struct Identifier;
-struct Deference;
+struct Dereference;
 struct ArrayAccess;
 struct FieldAccess;
 
@@ -37,6 +39,7 @@ struct Statement;
 struct Statements;
 struct Assignment;
 struct CallStatement;
+struct If;
 struct While;
 struct Break;
 struct Continue;
@@ -52,6 +55,7 @@ struct Program;
 struct Node {
     virtual ~Node() = default;
     virtual std::string toString() const = 0;
+    virtual void accept(Visitor &visitor) = 0;
 };
 
 // Declaration
@@ -61,12 +65,14 @@ struct Declaration : public Node {
 
     Declaration(std::string name, std::shared_ptr<Type> type);
     std::string toString() const override; 
+    void accept(Visitor &visitor) override;
 };
 
 // --------------------------------- Expressions -----------------------------------------
 struct Expression : public Node {
     virtual std::shared_ptr<Type> check(const Gamma &gamma, const Delta &delta) const = 0;
     virtual std::string toString() const override = 0;
+    virtual void accept(Visitor &visitor) override = 0;
 };
 
 struct Value : public Expression {
@@ -76,6 +82,7 @@ struct Value : public Expression {
     
     std::shared_ptr<Type> check(const Gamma &gamma, const Delta &delta) const override;
     std::string toString() const override;
+    void accept(Visitor &visitor) override;
 };
 
 struct Number : public Expression {
@@ -85,30 +92,31 @@ struct Number : public Expression {
 
     std::shared_ptr<Type> check(const Gamma &gamma, const Delta &delta) const override;
     std::string toString() const override;
+    void accept(Visitor &visitor) override;
 };
 
 struct Nil : public Expression {
     std::shared_ptr<Type> check(const Gamma &gamma, const Delta &delta) const override;
     std::string toString() const override;
+    void accept(Visitor &visitor) override;
 };
 
 struct Select : public Expression {
     std::unique_ptr<Expression> guard;
-    std::unique_ptr<Expression> happyCase;
-    std::unique_ptr<Expression> unhappyCase;
+    std::unique_ptr<Expression> ttCase;
+    std::unique_ptr<Expression> ffCase;
     
-    Select(std::unique_ptr<Expression> guard, std::unique_ptr<Expression> happyCase, std::unique_ptr<Expression> unhappyCase);
+    Select(std::unique_ptr<Expression> guard, std::unique_ptr<Expression> ttCase, std::unique_ptr<Expression> ffCase);
     
     std::shared_ptr<Type> check(const Gamma &gamma, const Delta &delta) const override;
     std::string toString() const override;
+    void accept(Visitor &visitor) override;
 };
 
 enum class UnaryOperand { 
     NEG, 
     NOT 
 };
-
-inline constexpr std::string_view unaryOperandToString(UnaryOperand op);
 
 struct UnaryOperation : public Expression {
     UnaryOperand operand;
@@ -118,6 +126,7 @@ struct UnaryOperation : public Expression {
     
     std::shared_ptr<Type> check(const Gamma &gamma, const Delta &delta) const override;
     std::string toString() const override;
+    void accept(Visitor &visitor) override;
 };
 
 enum class BinaryOperand {
@@ -135,8 +144,6 @@ enum class BinaryOperand {
     GTE
 };
 
-inline constexpr std::string_view binaryOperandToString(BinaryOperand op);
-
 struct BinaryOperation : public Expression {
     BinaryOperand operand;
     std::unique_ptr<Expression> lhs;
@@ -146,6 +153,7 @@ struct BinaryOperation : public Expression {
     
     std::shared_ptr<Type> check(const Gamma &gamma, const Delta &delta) const override;
     std::string toString() const override;
+    void accept(Visitor &visitor) override;
 };
 
 struct NewSingleton : public Expression {
@@ -155,6 +163,7 @@ struct NewSingleton : public Expression {
     
     std::shared_ptr<Type> check(const Gamma &gamma, const Delta &delta) const override;
     std::string toString() const override;
+    void accept(Visitor &visitor) override;
 };
 
 struct NewArray : public Expression {
@@ -165,6 +174,7 @@ struct NewArray : public Expression {
     
     std::shared_ptr<Type> check(const Gamma &gamma, const Delta &delta) const override;
     std::string toString() const override;
+    void accept(Visitor &visitor) override;
 };
 
 struct CallExpression : public Expression {
@@ -174,12 +184,14 @@ struct CallExpression : public Expression {
 
     std::shared_ptr<Type> check(const Gamma &gamma, const Delta &delta) const override;
     std::string toString() const override;
+    void accept(Visitor &visitor) override;
 };
 
 // --------------------------------- Places -----------------------------------------
 struct Place : public Node {
     virtual std::shared_ptr<Type> check(const Gamma &gamma, const Delta &delta) const = 0;
     virtual std::string toString() const override = 0;
+    virtual void accept(Visitor &visitor) override = 0;
 };
 
 struct Identifier : public Place {
@@ -189,6 +201,7 @@ struct Identifier : public Place {
     
     std::shared_ptr<Type> check(const Gamma &gamma, const Delta &delta) const override;
     std::string toString() const override;
+    void accept(Visitor &visitor) override;
 };
 
 struct Dereference : public Place {
@@ -198,6 +211,7 @@ struct Dereference : public Place {
     
     std::shared_ptr<Type> check(const Gamma &gamma, const Delta &delta) const override;
     std::string toString() const override;
+    void accept(Visitor &visitor) override;
 };
 
 struct ArrayAccess : public Place {
@@ -208,6 +222,7 @@ struct ArrayAccess : public Place {
     
     std::shared_ptr<Type> check(const Gamma &gamma, const Delta &delta) const override;
     std::string toString() const override;
+    void accept(Visitor &visitor) override;
 };
 
 struct FieldAccess : public Place {
@@ -218,6 +233,7 @@ struct FieldAccess : public Place {
     
     std::shared_ptr<Type> check(const Gamma &gamma, const Delta &delta) const override;
     std::string toString() const override;
+    void accept(Visitor &visitor) override;
 };
 
 // Function call
@@ -228,7 +244,8 @@ struct FunctionCall: Node {
     FunctionCall(std::unique_ptr<Expression> callee, std::vector<std::unique_ptr<Expression>> args);
         
     std::shared_ptr<Type> check(const Gamma &gamma, const Delta &delta) const;
-    std::string toString() const;
+    std::string toString() const override;
+    void accept(Visitor &visitor) override;
 };
 
 // ------------------------------------ Statements --------------------------------
@@ -241,6 +258,7 @@ struct Statements : public Statement {
     
     bool check(const Gamma &gamma, const Delta &delta, const std::shared_ptr<Type> &returnType, bool inLoop) const override;
     std::string toString() const override;
+    void accept(Visitor &visitor) override;
 };
 
 struct Assignment : public Statement {
@@ -251,6 +269,7 @@ struct Assignment : public Statement {
     
     bool check(const Gamma &gamma, const Delta &delta, const std::shared_ptr<Type> &returnType, bool inLoop) const override;
     std::string toString() const override;
+    void accept(Visitor &visitor) override;
 };
 
 struct CallStatement : public Statement {
@@ -260,6 +279,7 @@ struct CallStatement : public Statement {
     
     bool check(const Gamma &gamma, const Delta &delta, const std::shared_ptr<Type> &returnType, bool inLoop) const override;
     std::string toString() const override;
+    void accept(Visitor &visitor) override;
 };
 
 struct If : public Statement {
@@ -271,6 +291,7 @@ struct If : public Statement {
     
     bool check(const Gamma &gamma, const Delta &delta, const std::shared_ptr<Type> &returnType, bool inLoop) const override;
     std::string toString() const override;
+    void accept(Visitor &visitor) override;
 };
 
 struct While : public Statement {
@@ -281,16 +302,19 @@ struct While : public Statement {
 
     bool check(const Gamma &gamma, const Delta &delta, const std::shared_ptr<Type> &returnType, bool inLoop) const override;
     std::string toString() const override;
+    void accept(Visitor &visitor) override;
 };
 
 struct Break : public Statement {
     bool check(const Gamma &gamma, const Delta &delta, const std::shared_ptr<Type> &returnType, bool inLoop) const override;
     std::string toString() const override;
+    void accept(Visitor &visitor) override;
 };
 
 struct Continue : public Statement {
     bool check(const Gamma &gamma, const Delta &delta, const std::shared_ptr<Type> &returnType, bool inLoop) const override;
     std::string toString() const override;
+    void accept(Visitor &visitor) override;
 };
 
 struct Return : public Statement {
@@ -300,6 +324,7 @@ struct Return : public Statement {
 
     bool check(const Gamma &gamma, const Delta &delta, const std::shared_ptr<Type> &returnType, bool inLoop) const override;
     std::string toString() const override;
+    void accept(Visitor &visitor) override;
 };
 
 // ------------------------------------ Top level nodes --------------------------------
@@ -309,6 +334,7 @@ struct StructDefinition : public Node {
 
     void check(const Gamma &gamma, const Delta &delta) const;
     std::string toString() const override;
+    void accept(Visitor &visitor) override;
 };
 
 struct Extern : public Node {
@@ -317,6 +343,7 @@ struct Extern : public Node {
     std::shared_ptr<Type> returnType;
 
     std::string toString() const override;
+    void accept(Visitor &visitor) override;
 };
 
 
@@ -329,6 +356,7 @@ struct FunctionDefinition : public Node {
 
     void check(const Gamma &gamma, const Delta &delta) const;
     std::string toString() const override;
+    void accept(Visitor &visitor) override;
 };
 
 
@@ -339,6 +367,7 @@ struct Program : public Node {
 
     void check() const;
     std::string toString() const override;
+    void accept(Visitor &visitor) override;
 };
 
 #endif

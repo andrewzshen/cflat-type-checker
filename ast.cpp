@@ -1,61 +1,39 @@
 #include <stdexcept>
 #include <set>
-#include <iostream>
+#include <format>
 
 #include "ast.hpp"
 #include "builder.hpp"
 
-static const std::shared_ptr<IntType> INT_TYPE = std::make_shared<IntType>(); 
-static const std::shared_ptr<NilType> NIL_TYPE = std::make_shared<NilType>(); 
-
-constexpr std::string_view unaryOperandToString(UnaryOperand op) {
+static inline constexpr std::string_view unaryOperandToString(UnaryOperand op) {
     switch (op) {
-        case UnaryOperand::NEG: return "-";
-        case UnaryOperand::NOT: return "not";
-    }
-}
-
-constexpr std::string_view binaryOperandToString(BinaryOperand op) {
-    switch (op) {
-        case BinaryOperand::ADD:    return "+";  
-        case BinaryOperand::SUB:    return "-"; 
-        case BinaryOperand::MUL:    return "*";
-        case BinaryOperand::DIV:    return "/"; 
-        case BinaryOperand::AND:    return "and"; 
-        case BinaryOperand::OR:     return "or"; 
-        case BinaryOperand::EQ:     return "=="; 
-        case BinaryOperand::NOT_EQ: return "!="; 
-        case BinaryOperand::LT:     return "<";
-        case BinaryOperand::LTE:    return "<="; 
-        case BinaryOperand::GT:     return ">";
-        case BinaryOperand::GTE:    return ">=";
-    }
-}
-
-static int binaryPrecedence(BinaryOperand op) {
-    switch (op) {
-        case BinaryOperand::MUL:
-        case BinaryOperand::DIV:
-            return 6;
-        case BinaryOperand::ADD:
-        case BinaryOperand::SUB:
-            return 5;
-        case BinaryOperand::LT:
-        case BinaryOperand::LTE:
-        case BinaryOperand::GT:
-        case BinaryOperand::GTE:
-            return 4;
-        case BinaryOperand::EQ:
-        case BinaryOperand::NOT_EQ:
-            return 3;
-        case BinaryOperand::AND:
-            return 2;
-        case BinaryOperand::OR:
-            return 1;
+        case UnaryOperand::NEG: return "Neg";
+        case UnaryOperand::NOT: return "Not";
     }
     
-    return 0;
+    return "";
 }
+
+static inline constexpr std::string_view binaryOperandToString(BinaryOperand op) {
+    switch (op) {
+        case BinaryOperand::ADD:    return "Add";  
+        case BinaryOperand::SUB:    return "Sub"; 
+        case BinaryOperand::MUL:    return "Mul";
+        case BinaryOperand::DIV:    return "Div"; 
+        case BinaryOperand::AND:    return "And"; 
+        case BinaryOperand::OR:     return "Or"; 
+        case BinaryOperand::EQ:     return "Eq"; 
+        case BinaryOperand::NOT_EQ: return "NotEq"; 
+        case BinaryOperand::LT:     return "Lt";
+        case BinaryOperand::LTE:    return "Lte"; 
+        case BinaryOperand::GT:     return "Gt";
+        case BinaryOperand::GTE:    return "Gte";
+    }
+
+    return "";
+}
+
+/* Node declarations */
 
 /* Declaration */
 Declaration::Declaration(std::string name, std::shared_ptr<Type> type) {
@@ -66,6 +44,8 @@ Declaration::Declaration(std::string name, std::shared_ptr<Type> type) {
 std::string Declaration::toString() const {
     return type->toString() + " " + name;
 }
+
+void Declaration::accept(Visitor &visitor) {}
 
 /* Expressions */
 
@@ -79,8 +59,10 @@ std::shared_ptr<Type> Value::check(const Gamma &gamma, const Delta &delta) const
 }
 
 std::string Value::toString() const {
-    return place->toString();
+    return std::format("Val({})", place->toString());
 }
+
+void Value::accept(Visitor &visitor) {}
 
 // Number
 Number::Number(long long value) {
@@ -92,8 +74,10 @@ std::shared_ptr<Type> Number::check(const Gamma &gamma, const Delta &delta) cons
 }
 
 std::string Number::toString() const { 
-    return std::to_string(value); 
+    return std::format("Num({})", std::to_string(value)); 
 }
+
+void Number::accept(Visitor &visitor) {}
 
 // Nil
 std::shared_ptr<Type> Nil::check(const Gamma &gamma, const Delta &delta) const {
@@ -104,73 +88,48 @@ std::string Nil::toString() const {
     return "Nil"; 
 }
 
+void Nil::accept(Visitor &visitor) {}
+
 // Select
-Select::Select(std::unique_ptr<Expression> guard, std::unique_ptr<Expression> happyCase, std::unique_ptr<Expression> unhappyCase) {
+Select::Select(std::unique_ptr<Expression> guard, std::unique_ptr<Expression> ttCase, std::unique_ptr<Expression> ffCase) {
     this->guard = std::move(guard);
-    this->happyCase = std::move(happyCase);
-    this->unhappyCase = std::move(unhappyCase);
+    this->ttCase = std::move(ttCase);
+    this->ffCase = std::move(ffCase);
 }
 
 std::shared_ptr<Type> Select::check(const Gamma &gamma, const Delta &delta) const {
     std::shared_ptr<Type> guardType = guard->check(gamma, delta);
 
-    if (!typesEqual(guardType, std::make_shared<IntType>())) {
-        throw std::runtime_error("non-int type " + guardType->toString() + " for select guard '" + guard->toString() + "'");
+    if (guardType->getTypeKind() != TypeKind::INT) {
+        std::string guardTypeStr = guardType->toStringPretty();
+        std::string guardStr = guard->toString();
+        throw std::runtime_error(std::format("non-int type {} for select guard '{}'", guardTypeStr, guardStr));
     }
 
-    std::shared_ptr<Type> happyCaseType = happyCase->check(gamma, delta);
-    std::shared_ptr<Type> unhappyCaseType = unhappyCase->check(gamma, delta);
+    std::shared_ptr<Type> ttCaseType = trueCase->check(gamma, delta);
+    std::shared_ptr<Type> ffCaseType = falseCase->check(gamma, delta);
 
-    if (!typesEqual(happyCaseType, unhappyCaseType)) {
-        throw std::runtime_error(
-            "incompatible types " + 
-            happyCaseType->toString() + " vs " + unhappyCaseType->toString() + 
-            " in select branches '" +
-            happyCase->toString() + "' vs '" + unhappyCase->toString() + 
-            "'"
-        );
+    if (!typesEqual(ttCaseType, ffCaseType)) {
+        std::string ttCaseTypeStr = ttCaseType->toStringPretty();
+        std::string ttCaseStr = ttCase->toString();
+        std::string ffCaseTypeStr = ffCaseType->toStringPretty();
+        std::string ffCaseStr = ffCase->toString();
+        throw std::runtime_error(std::format("incompatible types {} vs {} in select branches '{}' vs '{}'", ttCaseTypeStr, ffCaseTypeStr, ttCaseStr, ffCaseStr));
     }
-
-    return pickNonNil(happyCaseType, unhappyCaseType);
+    
+    return ttCaseType->getTypeKind() == TypeKind::NIL ? ffCaseType : ttCaseType;
 }
 
 std::string Select::toString() const {
     std::string guardStr = guard->toString();
-    std::string happyCaseStr = happyCase->toString();
-    std::string unhappyCaseStr = unhappyCase->toString();
-    
-    if (const BinaryOperation *guardBinOp = dynamic_cast<const BinaryOperation*>(guard.get())) {
-        bool lhsIsSelect = dynamic_cast<const Select*>(guardBinOp->lhs.get()) != nullptr;
-        bool rhsIsSelect = dynamic_cast<const Select*>(guardBinOp->rhs.get()) != nullptr;
-        
-        if (lhsIsSelect || rhsIsSelect) {
-            std::string op = binaryOperandToString(guardBinOp->operand);
-            std::string lhsStr = guardBinOp->lhs->toString();
-            std::string rhsStr = guardBinOp->rhs->toString();
-            
-            if (lhsIsSelect) {
-                lhsStr = "(" + lhsStr + ")";
-            }
-
-            if (rhsIsSelect) {
-                rhsStr = "(" + rhsStr + ")";
-            }
-                    
-            guardStr = lhsStr + " " + op + " " + rhsStr;
-        }
-    }
-    
-    if (dynamic_cast<const Select*>(happyCase.get())) {
-        happyCaseStr = "(" + happyCaseStr + ")";
-    }
-    
-    if (dynamic_cast<const Select*>(unhappyCase.get())) {
-        unhappyCaseStr = "(" + unhappyCaseStr + ")";
-    }
-    
-    return guardStr + " ? " + happyCaseStr + " : " + unhappyCaseStr;
+    std::string ttCaseStr = ttCase->toString();
+    std::string ffCaseStr = ffCase->toString();
+    return std::format("Select {{ guard: {}, tt: {}, ff: {} }}", guardStr, ttCaseStr, ffCaseStr);
 }
 
+void Select::accept(Visitor &visitor) {}
+
+// UnaryOperation
 UnaryOperation::UnaryOperation(UnaryOperand operand, std::unique_ptr<Expression> expression) {
     this->operand = operand;
     this->expression = std::move(expression);
@@ -179,113 +138,70 @@ UnaryOperation::UnaryOperation(UnaryOperand operand, std::unique_ptr<Expression>
 std::shared_ptr<Type> UnaryOperation::check(const Gamma &gamma, const Delta &delta) const {
     std::shared_ptr<Type> operandType = expression->check(gamma, delta);
     
-    if (!typesEqual(operandType, std::make_shared<IntType>())) {
-        throw std::runtime_error("non-int operand type " + operandType->toString() + " in unary op '" + toString() + "'");
+    if (operandType->getTypeKind() != TypeKind::INT) {
+        std::string opTypeStr = operandType->toStringPretty();
+        std::string thisStr = toString();
+        throw std::runtime_error(std::format("non-int operand type {} in unary op '{}'", opTypeStr, thisStr));
     }
 
     return INT_TYPE; 
 }
 
 std::string UnaryOperation::toString() const {
-    std::string op = unaryOperandToString[operand] + " ";
-    std::string expStr = expression->toString();
-    return (dynamic_cast<const BinaryOperation*>(expression.get()) || dynamic_cast<const Select*>(expression.get())) ? 
-        op + "(" + expStr + ")" : 
-        op + expStr;
+    return std::format("UnOp({}, {})", std::string(unaryOperandToString(operand)), expression->toString());
 }
 
+void UnaryOperation::accept(Visitor &visitor) {}
+
+// BinaryOperation
 BinaryOperation::BinaryOperation(BinaryOperand operand, std::unique_ptr<Expression> lhs, std::unique_ptr<Expression> rhs) {
     this->operand = operand;
     this->lhs = std::move(lhs);
     this->rhs = std::move(rhs);
 }
 
-static std::string toStringCompact(const Expression *exp);
-
 std::shared_ptr<Type> BinaryOperation::check(const Gamma &gamma, const Delta &delta) const {
     std::shared_ptr<Type> lhsType = lhs->check(gamma, delta);
     std::shared_ptr<Type> rhsType = rhs->check(gamma, delta);
 
+    std::string lhsTypeStr = lhsType->toStringPretty();
+    std::string rhsTypeStr = rhsType->toStringPretty();
+    std::string lhsStr = lhs->toString();
+    std::string rhsStr = rhs->toString();
+
     if (operand == BinaryOperand::EQ || operand == BinaryOperand::NOT_EQ) {
         if (!typesEqual(lhsType, rhsType)) {
-            throw std::runtime_error("incompatible types " + lhsType->toString() + " vs " + rhsType->toString() + " in binary op '" + toStringCompact(this) + "'");
+            throw std::runtime_error(std::format("incompatible types {} vs {} in binary op '{}'", lhsTypeStr, rhsTypeStr, toString()));
         }
         
-        if (dynamic_cast<StructType*>(lhsType.get()) || dynamic_cast<FunctionType*>(lhsType.get())) {
-            throw std::runtime_error("invalid type " + lhsType->toString() + " used in binary op '" + toStringCompact(this) + "'");
+        if (lhsType->getTypeKind() == TypeKind::STRUCT || lhsType->getTypeKind() == TypeKind::FUNCTION) {
+            throw std::runtime_error(std::format("invalid type {} used in binary op '{}'", lhsTypeStr, toString()));
         }
         
-        if (dynamic_cast<StructType*>(rhsType.get()) || dynamic_cast<FunctionType*>(rhsType.get())) {
-            throw std::runtime_error("invalid type " + rhsType->toString() + " used in binary op '" + toStringCompact(this) + "'");
+        if (rhsType->getTypeKind() == TypeKind::STRUCT || rhsType->getTypeKind() == TypeKind::FUNCTION) {
+            throw std::runtime_error(std::format("invalid type {} used in binary op '{}'", rhsTypeStr, toString()));
         }
     } else {
-        if (!typesEqual(lhsType, std::make_shared<IntType>())) {
-            throw std::runtime_error("non-int type " + lhsType->toString() + " for left operand of binary op '" + toStringCompact(this) + "'");
+        if (!typesEqual(lhsType, INT_TYPE)) {
+            throw std::runtime_error(std::format("non-int type {} for left operand of binary op '{}'", lhsTypeStr, toString()));
         }
 
-        if (!typesEqual(rhsType, std::make_shared<IntType>())) {
-            throw std::runtime_error("right operand of binary op '" + toStringCompact(this) + "' has type " + rhsType->toString() + ", should be int");
+        if (!typesEqual(rhsType, INT_TYPE)) {
+            throw std::runtime_error(std::format("non-int type {} for right operand of binary op '{}'", rhsTypeStr, toString()));
         }
     }
     
     return INT_TYPE; 
 }
 
-static std::string toStringCompact(const Expression *exp) {
-    if (!exp) return "";
-    
-    if (const UnaryOperation *unOp = dynamic_cast<const UnaryOperation*>(exp)) {
-        std::string op = unaryOperandToString[unOp->operand] + (unOp->operand == UnaryOperand::NEG ? "" : " ");
-        std::string expStr = toStringCompact(unOp->expression.get());
-        return (dynamic_cast<const Select*>(unOp->expression.get()) || dynamic_cast<const BinaryOperation*>(unOp->expression.get())) ?
-            op + "(" + expStr + ")" :
-            op + expStr;
-    }
-    
-    if (const BinaryOperation *binOp = dynamic_cast<const BinaryOperation*>(exp)) {
-        std::string opStr = binaryOperandToString[binOp->operand];
-        std::string lhsStr = toStringCompact(binOp->lhs.get());
-        std::string rhsStr = toStringCompact(binOp->rhs.get());
-        
-        int thisPrecedence = binaryPrecedence(binOp->operand);
-        
-        if (const BinaryOperation *lhsBinOp = dynamic_cast<const BinaryOperation*>(binOp->lhs.get())) {
-            int lhsPrecedence = binaryPrecedence(lhsBinOp->operand);
-            if (lhsPrecedence < thisPrecedence) {
-                lhsStr = "(" + lhsStr + ")";
-            }
-        }
-        
-        if (const BinaryOperation *rhsBinOp = dynamic_cast<const BinaryOperation*>(binOp->rhs.get())) {
-            int rhsPrecedence = binaryPrecedence(rhsBinOp->operand);
-            bool needsParens = rhsPrecedence < thisPrecedence;
-            
-            if (!needsParens && (rhsPrecedence == thisPrecedence) && (thisPrecedence == 4)) {
-                needsParens = true;
-            }
-            
-            if (needsParens) {
-                rhsStr = "(" + rhsStr + ")";
-            }
-        }
-        
-        return lhsStr + " " + opStr + " " + rhsStr;
-    }
-    
-    return exp->toString();
-}
-
 std::string BinaryOperation::toString() const {
-    std::string op = binaryOperandToString(operand);
+    std::string opStr = std::string(binaryOperandToString(operand));
     std::string lhsStr = lhs->toString();
     std::string rhsStr = rhs->toString();
-
-    if (dynamic_cast<const Select*>(rhs.get())) {
-        rhsStr = "(" + rhsStr + ")";
-    }
-    
-    return lhsStr + " " + op + " " + rhsStr;
+    return std::format("BinOp {{ op: {}, left: {}, right: {} }}", opStr, lhsStr, rhsStr);
 }
+
+void BinaryOperation::accept(Visitor &visitor) {}
 
 // NewSingleton
 NewSingleton::NewSingleton(std::shared_ptr<Type> type) {
@@ -293,15 +209,18 @@ NewSingleton::NewSingleton(std::shared_ptr<Type> type) {
 }
 
 std::shared_ptr<Type> NewSingleton::check(const Gamma &gamma, const Delta &delta) const {
-    if (dynamic_cast<NilType*>(type.get()) || dynamic_cast<FunctionType*>(type.get())) {
-        throw std::runtime_error("invalid type used for allocation '" + toString() + "'");
+    if (type->getTypeKind() == TypeKind::NIL || type->getTypeKind() == TypeKind::FUNCTION) {
+        throw std::runtime_error(std::format("invalid type used for allocation '{}'", toString()));
     }
+    
     return std::make_shared<PointerType>(type);
 }
 
 std::string NewSingleton::toString() const {
-    return "new " + type->toString();
+    return std::format("NewSingle({})", type->toString());
 }
+
+void NewSingleton::accept(Visitor &visitor) {}
 
 // NewArray
 NewArray::NewArray(std::shared_ptr<Type> type, std::unique_ptr<Expression> size) {
@@ -312,43 +231,27 @@ NewArray::NewArray(std::shared_ptr<Type> type, std::unique_ptr<Expression> size)
 std::shared_ptr<Type> NewArray::check(const Gamma &gamma, const Delta &delta) const {
     std::shared_ptr<Type> sizeType = size->check(gamma, delta);
     
-    if (!typesEqual(sizeType, std::make_shared<IntType>())) {
-        throw std::runtime_error("non-int type " + sizeType->toString() + " used for second argument of allocation '" + toString() + "'");
+    std::string sizeTypeStr = sizeType->toStringPretty();
+    std::string thisStr = toString();
+
+    if (!typesEqual(sizeType, INT_TYPE)) {
+        throw std::runtime_error(std::format("non-int type {} used for second argument of allocation '{}'", sizeTypeStr, thisStr));
     }
 
-    if (dynamic_cast<NilType*>(type.get()) || dynamic_cast<FunctionType*>(type.get()) || dynamic_cast<StructType*>(type.get())) {
-        throw std::runtime_error("invalid type used for first argument of allocation '" + toString() + "'");
+    if (type->getTypeKind() == TypeKind::NIL || type->getTypeKind() == TypeKind::FUNCTION || type->getTypeKind() == TypeKind::STRUCT) {
+        throw std::runtime_error(std::format("invalid type used for first argument of allocation '{}'", thisStr));
     }
 
     return std::make_shared<ArrayType>(type);
 }
 
 std::string NewArray::toString() const {
+    std::string typeStr = type->toString();
     std::string sizeStr = size->toString();
-    
-    if (const BinaryOperation *sizeBinOp = dynamic_cast<const BinaryOperation*>(size.get())) {
-        bool lhsIsSelect = dynamic_cast<const Select*>(sizeBinOp->lhs.get()) != nullptr;
-        bool rhsIsSelect = dynamic_cast<const Select*>(sizeBinOp->rhs.get()) != nullptr;
-        
-        if (lhsIsSelect || rhsIsSelect) {
-            std::string op = binaryOperandToString(sizeBinOp->operand);
-            std::string lhsStr = sizeBinOp->lhs->toString();
-            std::string rhsStr = sizeBinOp->rhs->toString();
-
-            if (lhsIsSelect) {
-                lhsStr = "(" + lhsStr + ")";
-            }
-            
-            if (rhsIsSelect) {
-                rhsStr = "(" + rhsStr + ")";
-            }
-
-            sizeStr = lhsStr + " " + op + " " + rhsStr;
-        }
-    }
-    
-    return "[" + type->toString() + "; " + sizeStr + "]";
+    return std::format("NewArray({}, {})", typeStr, sizeStr);
 }
+
+void NewArray::accept(Visitor &visitor) {}
 
 // CallExpression
 CallExpression::CallExpression(std::unique_ptr<FunctionCall> functionCall) {
@@ -360,8 +263,10 @@ std::shared_ptr<Type> CallExpression::check(const Gamma &gamma, const Delta &del
 }
 
 std::string CallExpression::toString() const {
-    return functionCall->toString();
+    return std::format("Call({})", functionCall->toString());
 }
+
+void CallExpression::accept(Visitor &visitor) {}
 
 /* Places */
 
@@ -376,13 +281,15 @@ std::shared_ptr<Type> Identifier::check(const Gamma &gamma, const Delta &delta) 
     if (it != gamma.end()) {
         return it->second;
     } else {
-        throw std::runtime_error("id " + name + " does not exist in this scope");
+        throw std::runtime_error(std::format("id {} does not exist in this scope", name));
     }
 }
 
 std::string Identifier::toString() const {
-    return name;
+    return std::format("Id(\"{}\")", name);
 }
+
+void Identifier::accept(Visitor &visitor) {}
 
 // Dereference
 Dereference::Dereference(std::unique_ptr<Expression> expression) {
@@ -390,34 +297,23 @@ Dereference::Dereference(std::unique_ptr<Expression> expression) {
 }
 
 std::shared_ptr<Type> Dereference::check(const Gamma &gamma, const Delta &delta) const {
-    std::shared_ptr<Type> pointee = expression->check(gamma, delta);
+    std::shared_ptr<Type> pointeeType = expression->check(gamma, delta);
     
-    if (auto pointerType = std::dynamic_pointer_cast<PointerType>(pointee)) {
+    if (auto pointerType = std::dynamic_pointer_cast<PointerType>(pointeeType)) {
         return pointerType->pointeeType;
     }
 
-    throw std::runtime_error("non-pointer type " + pointee->toString() + " for dereference '" + toStringCompact(expression.get()) + ".*'");
+    std::string pointeeTypeStr = pointeeType->toStringPretty();
+    std::string thisStr = toString();
+
+    throw std::runtime_error(std::format("non-pointer type {} for dereference 'Val({})'", pointeeTypeStr, thisStr));
 }
 
 std::string Dereference::toString() const {
-    std::string expStr = expression->toString();
-    
-    const Node *checkExp = expression.get();
-    if (auto valueNode = dynamic_cast<const Value*>(checkExp)) {
-        checkExp = valueNode->place.get();
-    }
-    
-    if (dynamic_cast<const BinaryOperation*>(expression.get()) || 
-        dynamic_cast<const Select*>(expression.get()) ||
-        dynamic_cast<const NewArray*>(expression.get()) ||
-        dynamic_cast<const NewSingleton*>(expression.get()) ||
-        (dynamic_cast<const ArrayAccess*>(checkExp) && dynamic_cast<const Value*>(expression.get())) ||
-        (dynamic_cast<const FieldAccess*>(checkExp) && dynamic_cast<const Value*>(expression.get()))) {
-        expStr = "(" + expStr + ")";
-    }
-    
-    return expStr + ".*";
+    return std::format("Deref({})", expression->toString());
 }
+
+void Dereference::accept(Visitor &visitor) {}
 
 // ArrayAccess
 ArrayAccess::ArrayAccess(std::unique_ptr<Expression> array, std::unique_ptr<Expression> index) {
@@ -429,8 +325,12 @@ std::shared_ptr<Type> ArrayAccess::check(const Gamma &gamma, const Delta &delta)
     std::shared_ptr<Type> arrayType = array->check(gamma, delta); 
     std::shared_ptr<Type> indexType = index->check(gamma, delta); 
 
+    std::string arrayTypeStr = arrayType->toStringPretty();
+    std::string indexTypeStr = indexType->toStringPretty();
+    std::string thisStr = toString();
+
     if (!typesEqual(indexType, INT_TYPE)) {
-        throw std::runtime_error("non-int index type " + indexType->toString() + " for array access '" + array->toString() + "'");
+        throw std::runtime_error(std::format("non-int index type {} for array access '{}'", indexTypeStr, thisStr));
     }
 
     if (auto actualArrayType = std::dynamic_pointer_cast<ArrayType>(arrayType)) {
@@ -438,32 +338,19 @@ std::shared_ptr<Type> ArrayAccess::check(const Gamma &gamma, const Delta &delta)
     }
     
     if (typesEqual(arrayType, NIL_TYPE)) {
-        throw std::runtime_error("non-array type " + arrayType->toString() + " for array access '" + array->toString() + "'");
+        throw std::runtime_error(std::format("non-array type {} for array access '{}'", arrayTypeStr, thisStr));
     }
 
-    throw std::runtime_error("non-array type " + arrayType->toString() + " for array access '" + array->toString() + "'");
+    throw std::runtime_error(std::format("non-array type {} for array access '{}'", arrayTypeStr, thisStr));
 }
 
 std::string ArrayAccess::toString() const {
     std::string arrayStr = array->toString();
     std::string indexStr = index->toString();
-
-    if (dynamic_cast<const Select*>(array.get())) {
-        arrayStr = "(" + arrayStr + ")";
-    }
-    
-    if (const BinaryOperation *indexBinOp = dynamic_cast<const BinaryOperation*>(index.get())) {
-        if (dynamic_cast<const Select*>(indexBinOp->rhs.get()) != nullptr) {
-            std::string lhsStr = indexBinOp->lhs->toString();
-            std::string rhsStr = "(" + indexBinOp->rhs->toString() + ")";
-            std::string op = binaryOperandToString(indexBinOp->operand);
-            
-            indexStr = lhsStr + " " + op + " " + rhsStr;
-        }
-    }
-    
-    return arrayStr + "[" + indexStr + "]";
+    return std::format("ArrayAccess {{ array: {}, idx: {} }}", arrayStr, indexStr);
 }
+
+void ArrayAccess::accept(Visitor &visitor) {}
 
 // FieldAccess
 FieldAccess::FieldAccess(std::unique_ptr<Expression> pointer, std::string field) {
@@ -473,34 +360,43 @@ FieldAccess::FieldAccess(std::unique_ptr<Expression> pointer, std::string field)
 
 std::shared_ptr<Type> FieldAccess::check(const Gamma &gamma, const Delta &delta) const {
     std::shared_ptr<Type> baseType = pointer->check(gamma, delta);
-    auto pointerType = std::dynamic_pointer_cast<PointerType>(baseType);
+    
+    std::string baseTypeStr = baseType->toStringPretty();
+    std::string thisStr = this->toString();
 
-    if (!pointerType) {
-        throw std::runtime_error(baseType->toString() + " is not a struct pointer type in field access '" + toString() + "'");
+    auto ptrType = std::dynamic_pointer_cast<PointerType>(baseType);
+
+    if (!ptrType) {
+        throw std::runtime_error(std::format("{} is not a struct pointer type in field access '{}'", baseTypeStr, thisStr));
     }
     
-    auto structPointerType = std::dynamic_pointer_cast<StructType>(pointerType->pointeeType);
+    auto structPtrType = std::dynamic_pointer_cast<StructType>(ptrType->pointeeType);
     
-    if (!structPointerType) {
-        throw std::runtime_error(baseType->toString() + " is not a struct pointer type in field access '" + toString() + "'");
-    }
-    
-    if (!delta.count(structPointerType->name)) {
-        throw ("non-existent struct type " + structPointerType->name + " in field access '" + toString() + "'");
+    if (!structPtrType) {
+        throw std::runtime_error(std::format("{} is not a struct pointer type in field access '{}'", baseTypeStr, thisStr));
     }
 
-    const auto &fields = delta.at(structPointerType->name);
+    std::string structPtrTypeStr = structPtrType->toStringPretty();
+    
+    if (!delta.count(structPtrType->name)) {
+        throw std::runtime_error(std::format("non-existent struct type {} in field access '{}'", structPtrTypeStr, thisStr));
+    }
+
+    const auto &fields = delta.at(structPtrTypeStr);
     
     if (!fields.count(field)) {
-         throw std::runtime_error("non-existent field " + structPointerType->name + "::" + field + " in field access '" + toString() + "'");
+         throw std::runtime_error(std::format("non-existent field {}::{} in field access '{}'", structPtrTypeStr, field, thisStr));
     }
     
     return fields.at(field);
 }
 
 std::string FieldAccess::toString() const {
-    return pointer->toString() + "." + field;
+    std::string ptrStr = pointer->toString();
+    return std::format("FieldAccess {{ ptr: {}, field: \"{}\" }}", ptrStr, field);
 }
+
+void FieldAccess::accept(Visitor &visitor) {}
 
 // Function call
 FunctionCall::FunctionCall(std::unique_ptr<Expression> callee, std::vector<std::unique_ptr<Expression>> args) {
@@ -533,18 +429,13 @@ std::shared_ptr<Type> FunctionCall::check(const Gamma &gamma, const Delta &delta
     }
 
     if (!functionType) {
-         throw std::runtime_error("trying to call type " + calleeType->toString() + " as function pointer in call '" + toString() + "'");
+         throw std::runtime_error("trying to call type " + calleeType->toStringPretty() + " as function pointer in call '" + toString() + "'");
     }
 
     if (args.size() != functionType->paramTypes.size()) {
-         throw std::runtime_error(
-                 "incorrect number of arguments (" + 
-                 std::to_string(args.size()) + 
-                 " vs " + 
-                 std::to_string(functionType->paramTypes.size()) + 
+         throw std::runtime_error("incorrect number of arguments (" + std::to_string(args.size()) + " vs " + std::to_string(functionType->paramTypes.size()) + 
                  ") in call '" + toString() + 
-                 "'"
-            );
+                 "'");
     }
 
     for (size_t i = 0; i < args.size(); i++) {
@@ -552,13 +443,9 @@ std::shared_ptr<Type> FunctionCall::check(const Gamma &gamma, const Delta &delta
         const auto& paramType = functionType->paramTypes[i];
         
         if (!typesEqual(argType, paramType)) {
-             throw std::runtime_error(
-                "incompatible argument type " + 
-                argType->toString() + 
-                " vs parameter type " + paramType->toString() + 
+             throw std::runtime_error("incompatible argument type " + argType->toStringPretty() + " vs parameter type " + paramType->toStringPretty() + 
                 " for argument '" + args[i]->toString() + "' in call '" + toString() + 
-                "'"
-            );
+                "'");
         }
     }
 
@@ -569,16 +456,21 @@ std::string FunctionCall::toString() const {
     std::string calleeStr = callee ? callee->toString() : "<null>";
 
     std::stringstream ss;
-    ss << calleeStr << "(";
+    ss << "FunCall { "; 
+    ss << "callee: " << callee->toString() << ", ";
+    ss << "args: [";
     
     for (size_t i = 0; i < args.size(); i++) {
         ss << args[i]->toString();
         if (i < args.size() - 1) ss << ", ";
     }
 
-    ss << ")";
+    ss << "] ";
+    ss << "}";
     return ss.str();
 }
+
+void FunctionCall::accept(Visitor &visitor) {}
 
 /* Statements */
 
@@ -611,6 +503,8 @@ std::string Statements::toString() const {
     return ss.str();
 }
 
+void Statements::accept(Visitor &visitor) {}
+
 // Assignment
 Assignment::Assignment(std::unique_ptr<Place> place, std::unique_ptr<Expression> expression) { 
     this->place = std::move(place);
@@ -622,25 +516,11 @@ bool Assignment::check(const Gamma &gamma, const Delta &delta, const std::shared
     std::shared_ptr<Type> rhsType = expression->check(gamma, delta);
 
     if (dynamic_cast<StructType*>(lhsType.get()) || dynamic_cast<FunctionType*>(lhsType.get()) || dynamic_cast<NilType*>(lhsType.get())) {
-        throw std::runtime_error(
-                "invalid type " + 
-                lhsType->toString() + 
-                " for left-hand side of assignment '" + 
-                place->toString() + " = " + expression->toString() + 
-                "'"
-            );
+        throw std::runtime_error("invalid type " + lhsType->toStringPretty() + " for left-hand side of assignment '" + toString() + "'");
     }
 
     if (!typesEqual(lhsType, rhsType)) {
-         throw std::runtime_error(
-                 "incompatible types " + 
-                 lhsType->toString() + 
-                 " vs " + 
-                 rhsType->toString() + 
-                 " for assignment '" + 
-                 place->toString() + " = " + expression->toString() + 
-                 "'"
-            );
+         throw std::runtime_error("incompatible types " + lhsType->toStringPretty() + " vs " + rhsType->toStringPretty() + " for assignment '" + toString() + "'");
     }
 
     return false;
@@ -649,6 +529,8 @@ bool Assignment::check(const Gamma &gamma, const Delta &delta, const std::shared
 std::string Assignment::toString() const {
     return "Assign(" + place->toString() + ", " + expression->toString() + ")";
 }
+
+void Assignment::accept(Visitor &visitor) {}
 
 // CallStatement
 CallStatement::CallStatement(std::unique_ptr<FunctionCall> functionCall) {
@@ -664,6 +546,8 @@ std::string CallStatement::toString() const {
     return "Call(" + functionCall->toString() + ")";
 }
 
+void CallStatement::accept(Visitor &visitor) {}
+
 // If
 If::If(std::unique_ptr<Expression> guard, std::unique_ptr<Statement> happyPath, std::optional<std::unique_ptr<Statement>> unhappyPath) {
     this->guard = std::move(guard);
@@ -675,7 +559,7 @@ bool If::check(const Gamma &gamma, const Delta &delta, const std::shared_ptr<Typ
     std::shared_ptr<Type> guardType = guard->check(gamma, delta);
 
     if (!typesEqual(guardType, std::make_shared<IntType>())) {
-        throw std::runtime_error("non-int type " + guardType->toString() + " for if guard '" + guard->toString() + "'");
+        throw std::runtime_error("non-int type " + guardType->toStringPretty() + " for if guard '" + guard->toString() + "'");
     }
 
     bool happyPathReturns = happyPath->check(gamma, delta, returnType, inLoop); 
@@ -693,6 +577,8 @@ std::string If::toString() const {
     return ss.str();
 }
 
+void If::accept(Visitor &visitor) {}
+
 // While
 While::While(std::unique_ptr<Expression> guard, std::unique_ptr<Statement> body) {
     this->guard = std::move(guard);
@@ -703,7 +589,7 @@ bool While::check(const Gamma &gamma, const Delta &delta, const std::shared_ptr<
     std::shared_ptr<Type> guardType = guard->check(gamma, delta);
     
     if (!typesEqual(guardType, std::make_shared<IntType>())) {
-         throw std::runtime_error("non-int type " + guardType->toString() + " for while guard '" + guard->toString() + "'");
+        throw std::runtime_error("non-int type " + guardType->toStringPretty() + " for while guard '" + guard->toString() + "'");
     }
 
     body->check(gamma, delta, returnType, true);
@@ -713,6 +599,8 @@ bool While::check(const Gamma &gamma, const Delta &delta, const std::shared_ptr<
 std::string While::toString() const {
     return "While(" + guard->toString() + ", " + body->toString() + ")";
 }
+
+void While::accept(Visitor &visitor) {}
 
 // Break
 bool Break::check(const Gamma &gamma, const Delta &delta, const std::shared_ptr<Type> &returnType, bool inLoop) const {
@@ -726,6 +614,8 @@ std::string Break::toString() const {
     return "Break"; 
 }
 
+void Break::accept(Visitor &visitor) {}
+
 // Continue
 bool Continue::check(const Gamma &gamma, const Delta &delta, const std::shared_ptr<Type> &returnType, bool inLoop) const {
     if (!inLoop) {
@@ -737,6 +627,8 @@ bool Continue::check(const Gamma &gamma, const Delta &delta, const std::shared_p
 std::string Continue::toString() const {
     return "Continue";
 }
+
+void Continue::accept(Visitor &visitor) {}
 
 // Return
 Return::Return(std::optional<std::unique_ptr<Expression>> expression) {
@@ -750,14 +642,14 @@ bool Return::check(const Gamma &gamma, const Delta &delta, const std::shared_ptr
         if (!typesEqual(expressionType, returnType)) {
              throw std::runtime_error(
                 "incompatible return type " + 
-                expressionType->toString() + 
+                expressionType->toStringPretty() + 
                 " for 'return " + (*expression)->toString() + 
-                "', should be " + returnType->toString()
+                "', should be " + returnType->toStringPretty()
             );
         }
     } else {
         if (!typesEqual(returnType, std::make_shared<IntType>())) {
-            throw std::runtime_error("missing return expression for non-int function type " + returnType->toString());
+            throw std::runtime_error("missing return expression for non-int function type " + returnType->toStringPretty());
         }
         throw std::runtime_error("return statement requires an expression in this function");
     }
@@ -773,6 +665,8 @@ std::string Return::toString() const {
     return ss.str();
 }
 
+void Return::accept(Visitor &visitor) {}
+
 /* Top level nodes*/
 
 // StructDefinition
@@ -785,7 +679,7 @@ void StructDefinition::check(const Gamma &gamma, const Delta &delta) const {
 
     for (const auto& field : fields) {
         if (dynamic_cast<NilType*>(field.type.get()) || dynamic_cast<StructType*>(field.type.get()) || dynamic_cast<FunctionType*>(field.type.get())) {
-             throw std::runtime_error("invalid type " + field.type->toString() + " for struct field " + name + "::" + field.name);
+             throw std::runtime_error("invalid type " + field.type->toStringPretty() + " for struct field " + name + "::" + field.name);
         }
         
         if (fieldNames.find(field.name) != fieldNames.end()) {
@@ -809,6 +703,8 @@ std::string StructDefinition::toString() const {
     return ss.str();
 }
 
+void StructDefinition::accept(Visitor &visitor) {}
+
 // Extern
 std::string Extern::toString() const {
     std::stringstream ss;
@@ -830,6 +726,8 @@ std::string Extern::toString() const {
     return ss.str();
 }
 
+void Extern::accept(Visitor &visitor) {}
+
 // FunctionDefinition
 void FunctionDefinition::check(const Gamma &gamma, const Delta &delta) const {
     Gamma localGamma = gamma;
@@ -839,7 +737,7 @@ void FunctionDefinition::check(const Gamma &gamma, const Delta &delta) const {
         if (dynamic_cast<NilType*>(param.type.get()) || 
             dynamic_cast<StructType*>(param.type.get()) || 
             dynamic_cast<FunctionType*>(param.type.get())) {
-            throw std::runtime_error("invalid type " + param.type->toString() + " for variable " + param.name + " in function " + name);
+            throw std::runtime_error("invalid type " + param.type->toStringPretty() + " for variable " + param.name + " in function " + name);
         }
 
         if (localNames.find(param.name) != localNames.end()) {
@@ -853,7 +751,7 @@ void FunctionDefinition::check(const Gamma &gamma, const Delta &delta) const {
         if (dynamic_cast<NilType*>(local.type.get()) || 
             dynamic_cast<StructType*>(local.type.get()) || 
             dynamic_cast<FunctionType*>(local.type.get())) {
-            throw std::runtime_error("invalid type " + local.type->toString() + " for variable " + local.name + " in function " + name);
+            throw std::runtime_error("invalid type " + local.type->toStringPretty() + " for variable " + local.name + " in function " + name);
         }
 
         if (localNames.find(local.name) != localNames.end()) {
@@ -910,6 +808,8 @@ std::string FunctionDefinition::toString() const {
     return ss.str();
 }
 
+void FunctionDefinition::accept(Visitor &visitor) {}
+
 // Program
 void Program::check() const {
     std::set<std::string> topLevelNames;
@@ -936,13 +836,12 @@ void Program::check() const {
     Delta delta = constructDelta(structs);
 
     bool mainFound = false;
+    
     for (const auto &f : functions) {
         if (f->name == "main") {
             if (f->params.empty() && typesEqual(f->returnType, std::make_shared<IntType>())) {
                 mainFound = true;
-            } else {
-                throw std::runtime_error("function 'main' exists but has wrong type, should be '() -> int'");
-            }
+            }         
         }
     }
 
@@ -990,3 +889,5 @@ std::string Program::toString() const {
     
     return ss.str();
 }
+
+void Program::accept(Visitor &visitor) {}
